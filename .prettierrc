@@ -1,0 +1,6 @@
+{
+  &quot;singleQuote&quot;: true,
+  &quot;trailingComma&quot;: &quot;all&quot;,
+  &quot;printWidth&quot;: 100,
+  &quot;tabWidth&quot;: 2
+}

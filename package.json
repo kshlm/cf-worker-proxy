@@ -1,0 +1,30 @@
+{
+  "name": "worker-proxy",
+  "version": "1.0.0",
+  "description": "Cloudflare Workers based proxy server",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "wrangler dev",
+    "build": "wrangler build",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/ --ext .ts,.js",
+    "lint:fix": "eslint src/ --ext .ts,.js --fix",
+    "format": "prettier --write .",
+    "test": "vitest run",
+    "test:watch": "vitest watch",
+    "test:coverage": "vitest run --coverage"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241011.0",
+    "@types/node": "^22.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "eslint": "^9.0.0",
+    "prettier": "^3.0.0",
+    "typescript": "^5.0.0",
+    "vitest": "^2.0.0",
+    "wrangler": "^3.0.0"
+  }
+}

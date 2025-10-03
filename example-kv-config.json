@@ -1,0 +1,19 @@
+{
+  "api": {
+    "url": "https://api.example.com",
+    "headers": {
+      "X-Custom": "value",
+      "Authorization": "Bearer static-token"
+    },
+    "auth": "Bearer required-token"
+  },
+  "web": {
+    "url": "https://web.example.com"
+  },
+  "images": {
+    "url": "https://cdn.example.com",
+    "headers": {
+      "X-CDN": "true"
+    }
+  }
+}

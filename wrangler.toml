@@ -1,0 +1,14 @@
+name = "worker-proxy"
+main = "src/index.ts"
+compatibility_date = "2024-10-01"
+
+[env.production.vars]
+ENVIRONMENT = "production"
+
+[env.development.vars]
+ENVIRONMENT = "development"
+
+[[kv_namespaces]]
+binding = "PROXY_SERVERS"
+id = "proxy-servers-kv"
+preview_id = "proxy-servers-kv-preview"
