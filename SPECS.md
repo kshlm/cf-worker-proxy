@@ -6,9 +6,9 @@ Worker Proxy is a Cloudflare Worker that serves as a reverse proxy, routing inco
 ## Architecture
 - **Deployment Environment**: Cloudflare Workers (edge computing platform).
 - **Runtime**: TypeScript, compiled to JavaScript for Worker execution.
-- **Storage**: Cloudflare KV for storing server configurations.
+- **Storage**: Cloudflare KV for storing server configurations. Cloudflare Secrets for storing sensitive information.
 - **Networking**: Uses the Fetch API for proxying requests to backend servers.
-- **Authentication**: Header-based (e.g., Authorization), compared against KV-stored values.
+- **Authentication**: Header-based (e.g., Authorization), compared against secret-stored values.
 
 ## Key Components
 ### 1. Request Router
@@ -18,47 +18,52 @@ Worker Proxy is a Cloudflare Worker that serves as a reverse proxy, routing inco
 - If no configuration found, returns HTTP 404 Not Found.
 
 ### 2. Server Configuration
-- Stored in KV under a namespace bound to the Worker (e.g., `PROXY_SERVERS`).
-- Key structure: A JSON object at key `servers` mapping server keys to configurations, or individual keys like `server:api`.
-- Configuration Schema (TypeScript interface):
+ Stored in KV under a namespace bound to the Worker (e.g., `PROXY_SERVERS`).
+ Key structure: Individual keys like per configured proxy server, eg. `api`
+ Values: `ServerConfig` objects serialized into JSON
   ```typescript
   interface ServerConfig {
     url: string; // Base URL of the downstream server (e.g., 'https://api.example.com')
-    headers?: Record&lt;string, string&gt;; // Custom headers to add (e.g., { 'Authorization': 'Bearer static-token' })
-    auth?: string; // Required Authorization header value for this server (e.g., 'Bearer user-token')
+    headers?: Record<string, string>; // Custom headers to add (e.g., { 'Authorization': 'Bearer ${API_TOKEN}' })
+    auth?: string; // Required Authorization header value for this server (e.g., 'Bearer ${REQUIRED_AUTH}')
+    
+    Note: Both `auth` and header values support interpolation using Worker Secrets.
+    Use placeholders like `${SECRET_NAME}` which will be replaced with the value from `env.SECRET_NAME` at runtime.
+    This allows storing sensitive tokens as Cloudflare Worker Secrets instead of plain text in KV.
   }
   ```
-- Example KV Entry (`servers` key):
+
   ```json
   {
-    &quot;api&quot;: {
-      &quot;url&quot;: &quot;https://api.backend.com&quot;,
-      &quot;headers&quot;: { &quot;X-Custom&quot;: &quot;value&quot; },
-      &quot;auth&quot;: &quot;Bearer required-token&quot;
+    "api": {
+      "url": "https://api.backend.com",
+      "headers": { "X-Custom": "value", "Authorization": "Bearer ${API_AUTH_TOKEN}" },
+      "auth": "Bearer ${REQUIRED_AUTH_TOKEN}"
     },
-    &quot;web&quot;: {
-      &quot;url&quot;: &quot;https://web.backend.com&quot;
+    "web": {
+      "url": "https://web.backend.com"
     }
   }
   ```
 
-### 3. Authentication and Authorization
+## 3. Authentication and Authorization
 - For servers with `auth` configured:
   - Extracts `Authorization` header from incoming request.
   - Compares it exactly with the configured `auth` value (case-sensitive, no hashing for simplicity).
-  - If mismatch or absent, returns HTTP 401 Unauthorized with message &quot;Authentication required&quot;.
-- No auth required if not specified in config.
+  - If mismatch or absent, returns HTTP 401 Unauthorized with message "Authentication required".
+   - No auth required if not specified in config.
 
 ### 4. Request Forwarding
 - Constructs backend URL: `config.url + '/' + remainingPath + search` (where `remainingPath` is the original path minus the first segment).
 - Preserves original query parameters (`search`).
 - Method, body, and non-auth headers are forwarded as-is.
 - Adds config `headers` to the outgoing request.
+  - Interpolates any secrets in the config `headers`
 - Forwards the response from backend unchanged (status, headers, body).
 - Handles CORS: Adds appropriate headers if needed, but proxies handle this.
 
 ### 5. Error Handling
-- **KV Errors**: If KV read fails, return HTTP 500 Internal Server Error with &quot;Configuration error&quot;.
+- **KV Errors**: If KV read fails, return HTTP 500 Internal Server Error with "Configuration error".
 - **Fetch Errors**: If backend fetch fails (e.g., network error), return HTTP 502 Bad Gateway.
 - **Invalid URLs**: Validate config `url` is HTTPS; log and return 500 if invalid.
 - Logging: Use `console.error` for debugging; avoid logging sensitive data like auth tokens.
@@ -69,7 +74,7 @@ Worker Proxy is a Cloudflare Worker that serves as a reverse proxy, routing inco
 3. Split pathname by `/`, take first non-empty segment as `serverKey`.
 4. If no `serverKey` or empty path, return 404.
 5. Retrieve config: `await env.KV.get('servers', { type: 'json' })`, then `config = servers[serverKey]`.
-6. If no config, return 404 &quot;Server not found&quot;.
+6. If no config, return 404 "Server not found".
 7. Auth check: If `config.auth`, compare `request.headers.get('Authorization')` === `config.auth`; else 401.
 8. Build backend URL: `${config.url}/${pathname.slice(serverKey.length + 1)}${search}`.
 9. Clone request, set `url` to backend URL, add `config.headers`.

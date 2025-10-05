@@ -1,6 +1,61 @@
 import { getServerKey, buildBackendUrl } from './router'
 import { checkAuth } from './auth'
-import { ServerConfig, Env, ServersConfig } from './types'
+import { ServerConfig, Env } from './types'
+
+/**
+ * Interpolates secrets into a string using ${SECRET_NAME} pattern.
+ * Falls back to original placeholder if secret is missing.
+ * Returns null if any required secret is missing (for auth fields).
+ */
+function interpolateSecrets(value: string, env: Env, isAuth: boolean = false): string | null {
+  const result = value.replace(/\$\{(\w+)\}/g, (match, secretName) => {
+    const secretValue = env[secretName] as string | undefined
+    if (secretValue !== undefined) {
+      return secretValue
+    }
+    
+    // For auth fields, missing secrets should cause failure
+    if (isAuth) {
+      throw new Error(`Missing required secret: ${secretName}`)
+    }
+    
+    // For headers, fallback to placeholder
+    return match
+  })
+  
+  return result
+}
+
+/**
+ * Processes a server config by interpolating secrets in auth and headers.
+ * Throws error if required auth secrets are missing.
+ */
+function processServerConfig(config: ServerConfig, env: Env): ServerConfig {
+  const processed = { ...config }
+  
+  if (processed.auth) {
+    try {
+      const interpolatedAuth = interpolateSecrets(processed.auth, env, true)
+      if (interpolatedAuth === null) {
+        throw new Error('Auth interpolation failed')
+      }
+      processed.auth = interpolatedAuth
+    } catch {
+      throw new Error('Missing required authentication secret')
+    }
+  }
+  
+  if (processed.headers) {
+    processed.headers = Object.fromEntries(
+      Object.entries(processed.headers).map(([key, value]) => [
+        key,
+        interpolateSecrets(value, env, false) ?? value
+      ])
+    )
+  }
+  
+  return processed
+}
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -11,50 +66,95 @@ export default {
       // Extract server key from path
       const serverKey = getServerKey(pathname)
       if (!serverKey) {
-        return new Response('Not Found', { status: 404 })
+        return new Response(
+          JSON.stringify({ error: "Invalid route: No server configured for this path." }),
+          { 
+            status: 404,
+            headers: { 'Content-Type': 'application/json' }
+          }
+        )
       }
       
       // Get server configuration from KV
-      let servers: ServersConfig
+      let config: ServerConfig | undefined
       try {
-        const serversData = await env.PROXY_SERVERS.get('servers', { type: 'json' })
-        servers = (serversData as ServersConfig) ?? {}
+        const serverData = await env.PROXY_SERVERS.get(serverKey, { type: 'json' })
+        config = serverData as ServerConfig
       } catch (error) {
-        console.error('Failed to retrieve servers configuration:', error)
-        return new Response('Configuration error', { status: 500 })
+        console.error(`KV retrieval failed for path "${pathname}" (server: ${serverKey}):`, error)
+        return new Response(
+          JSON.stringify({ error: "Service unavailable: Unable to load configuration." }),
+          { 
+            status: 500,
+            headers: { 'Content-Type': 'application/json' }
+          }
+        )
       }
       
-      const config: ServerConfig | undefined = servers[serverKey]
       if (!config) {
-        return new Response('Server not found', { status: 404 })
+        return new Response(
+          JSON.stringify({ error: "Server not found: No configuration available for this route." }),
+          { 
+            status: 404,
+            headers: { 'Content-Type': 'application/json' }
+          }
+        )
+      }
+      
+      // Process config with secret interpolation
+      let processedConfig: ServerConfig
+      try {
+        processedConfig = processServerConfig(config, env)
+      } catch (error) {
+        console.error(`Config processing failed for server "${serverKey}" (path: "${pathname}"):`, error)
+        return new Response(
+          JSON.stringify({ error: "Configuration invalid: Server setup requires review." }),
+          { 
+            status: 500,
+            headers: { 'Content-Type': 'application/json' }
+          }
+        )
       }
       
       // Validate backend URL
       let backendUrl: URL
       try {
-        backendUrl = new URL(config.url)
+        backendUrl = new URL(processedConfig.url)
         if (backendUrl.protocol !== 'https:') {
           throw new Error('Only HTTPS URLs are allowed')
         }
       } catch (error) {
-        console.error(`Invalid backend URL for server ${serverKey}:`, error)
-        return new Response('Configuration error', { status: 500 })
+        console.error(`URL validation failed for server "${serverKey}" (path: "${pathname}"):`, error)
+        return new Response(
+          JSON.stringify({ error: "Configuration invalid: Backend URL is malformed or insecure." }),
+          { 
+            status: 500,
+            headers: { 'Content-Type': 'application/json' }
+          }
+        )
       }
       
       // Check authentication
-      if (!checkAuth(request, config.auth)) {
-        return new Response('Authentication required', { status: 401 })
+      if (!checkAuth(request, processedConfig.auth)) {
+        console.warn(`Authentication failed for server "${serverKey}" (path: "${pathname}")`)
+        return new Response(
+          JSON.stringify({ error: "Unauthorized: Invalid or missing credentials." }),
+          { 
+            status: 401,
+            headers: { 'Content-Type': 'application/json' }
+          }
+        )
       }
       
       // Build backend URL
-      const targetUrl = buildBackendUrl(config.url, request.url, serverKey)
+      const targetUrl = buildBackendUrl(processedConfig.url, request.url, serverKey)
       
       // Create modified request
       const modifiedHeaders = new Headers(request.headers)
       
       // Add custom headers from config
-      if (config.headers) {
-        Object.entries(config.headers).forEach(([key, value]) => {
+      if (processedConfig.headers) {
+        Object.entries(processedConfig.headers).forEach(([key, value]) => {
           modifiedHeaders.set(key, value)
         })
       }
@@ -64,6 +164,7 @@ export default {
         headers: modifiedHeaders,
         body: request.body,
         redirect: request.redirect,
+        duplex: 'half'
       } as RequestInit)
       
       // Forward request to backend
@@ -71,13 +172,25 @@ export default {
         const response = await fetch(modifiedRequest)
         return response
       } catch (error) {
-        console.error(`Failed to fetch from backend for server ${serverKey}:`, error)
-        return new Response('Bad Gateway', { status: 502 })
+        console.error(`Backend fetch failed for server "${serverKey}" (path: "${pathname}", target: "${targetUrl.origin}"):`, error)
+        return new Response(
+          JSON.stringify({ error: "Backend unavailable: Target server is unreachable." }),
+          { 
+            status: 502,
+            headers: { 'Content-Type': 'application/json' }
+          }
+        )
       }
       
     } catch (error) {
-      console.error('Unexpected error:', error)
-      return new Response('Internal Server Error', { status: 500 })
+      console.error(`Unexpected error handling request to "${request.url}":`, error)
+      return new Response(
+        JSON.stringify({ error: "Internal server error: An unexpected issue occurred." }),
+        { 
+          status: 500,
+          headers: { 'Content-Type': 'application/json' }
+        }
+      )
     }
   }
 }

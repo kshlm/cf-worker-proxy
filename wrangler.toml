@@ -10,5 +10,5 @@ ENVIRONMENT = "development"
 
 [[kv_namespaces]]
 binding = "PROXY_SERVERS"
-id = "proxy-servers-kv"
-preview_id = "proxy-servers-kv-preview"
+id = "85f8312ab78f4214adf592da8e8f2ce4"
+

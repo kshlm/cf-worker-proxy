@@ -8,6 +8,7 @@
     "dev": "wrangler dev",
     "build": "wrangler build",
     "deploy": "wrangler deploy",
+    "update-config": "bun scripts/update-proxy-config.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/ --ext .ts,.js",
     "lint:fix": "eslint src/ --ext .ts,.js --fix",
@@ -17,14 +18,15 @@
     "test:coverage": "vitest run --coverage"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20241011.0",
-    "@types/node": "^22.0.0",
-    "@typescript-eslint/eslint-plugin": "^8.0.0",
-    "@typescript-eslint/parser": "^8.0.0",
-    "eslint": "^9.0.0",
-    "prettier": "^3.0.0",
-    "typescript": "^5.0.0",
-    "vitest": "^2.0.0",
-    "wrangler": "^3.0.0"
+    "@cloudflare/workers-types": "^4.20251004.0",
+    "@types/node": "^24.6.2",
+    "@typescript-eslint/eslint-plugin": "^8.45.0",
+    "@typescript-eslint/parser": "^8.45.0",
+    "@vitest/coverage-v8": "^2.1.9",
+    "eslint": "^9.37.0",
+    "prettier": "^3.6.2",
+    "typescript": "^5.9.3",
+    "vitest": "^2.1.9",
+    "wrangler": "^4.42.0"
   }
 }

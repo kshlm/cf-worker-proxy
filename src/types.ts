@@ -10,4 +10,5 @@ export interface ServersConfig {
 
 export interface Env {
   PROXY_SERVERS: KVNamespace
+  [key: string]: string | KVNamespace | undefined
 }

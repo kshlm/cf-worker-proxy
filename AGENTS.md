@@ -1,5 +1,3 @@
-# CRUSH.md for Worker Proxy (Cloudflare Workers)
-
 ## Project Overview
 Worker Proxy is a Cloudflare Workers-based proxy server for routing requests to multiple downstream servers based on URL paths. Configuration uses Cloudflare KV for servers and auth. Written in TypeScript.
 
