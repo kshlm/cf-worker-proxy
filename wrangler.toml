@@ -12,3 +12,6 @@ ENVIRONMENT = "development"
 binding = "PROXY_SERVERS"
 id = "85f8312ab78f4214adf592da8e8f2ce4"
 
+[[routes]]
+pattern = "pipe.kshlm.xyz"
+custom_domain = true
