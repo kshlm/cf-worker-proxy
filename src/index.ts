@@ -135,8 +135,9 @@ export default {
       }
       
       // Check authentication
-      if (!checkAuth(request, processedConfig.auth)) {
-        console.warn(`Authentication failed for server "${serverKey}" (path: "${pathname}")`)
+      if (!checkAuth(request, processedConfig.auth, processedConfig.authHeader)) {
+        const authHeaderName = processedConfig.authHeader || 'Authorization'
+        console.warn(`Authentication failed for server "${serverKey}" (path: "${pathname}") using ${authHeaderName} header`)
         return new Response(
           JSON.stringify({ error: "Unauthorized: Invalid or missing credentials." }),
           { 
@@ -150,12 +151,24 @@ export default {
       const targetUrl = buildBackendUrl(processedConfig.url, request.url, serverKey)
       
       // Create modified request
-      const modifiedHeaders = new Headers(request.headers)
-      
-      // Add custom headers from config
+      const modifiedHeaders = new Headers()
+
+      // Determine which auth header to exclude
+      const authHeaderName = processedConfig.authHeader || 'Authorization'
+
+      // Copy all incoming headers, excluding the auth header
+      for (const [key, value] of request.headers.entries()) {
+        if (key.toLowerCase() !== authHeaderName.toLowerCase()) {
+          modifiedHeaders.set(key, value)
+        }
+      }
+
+      // Add custom headers from config only if they don't already exist
       if (processedConfig.headers) {
         Object.entries(processedConfig.headers).forEach(([key, value]) => {
-          modifiedHeaders.set(key, value)
+          if (!request.headers.has(key)) {
+            modifiedHeaders.set(key, value)
+          }
         })
       }
       
@@ -172,7 +185,7 @@ export default {
         const response = await fetch(modifiedRequest)
         return response
       } catch (error) {
-        console.error(`Backend fetch failed for server "${serverKey}" (path: "${pathname}", target: "${targetUrl.origin}"):`, error)
+        console.error(`Backend fetch failed for server "${serverKey}" (path: "${pathname}", target: "${new URL(targetUrl).origin}"):`, error)
         return new Response(
           JSON.stringify({ error: "Backend unavailable: Target server is unreachable." }),
           { 

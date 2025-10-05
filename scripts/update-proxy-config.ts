@@ -142,8 +142,18 @@ async function addEntry() {
   const needsAuth = needsAuthInput === 'y'
   let auth: string | undefined
 
+  let authHeader: string | undefined
   if (needsAuth) {
-    const authChoice = (await askQuestion('Choose auth type:\n1. Manual entry (use ${SECRET_NAME} placeholders)\n2. Auto-generate token and save as secret\nEnter choice (1 or 2): ')).trim()
+    const useCustomHeader = (await askQuestion('Use custom auth header? (y/n, default: Authorization): ')).toLowerCase().trim()
+    if (useCustomHeader === 'y') {
+      authHeader = (await askQuestion('Enter custom header name (e.g., X-API-Key): ')).trim()
+      if (!authHeader) {
+        console.log('Header name cannot be empty, using default Authorization header.')
+        authHeader = undefined
+      }
+    }
+
+    const authChoice = (await askQuestion('Choose auth type:\n1. Manual entry (use ${SECRET_NAME} placeholders)\n2. Auto-generate token and save as secret\n3. Auto-generate with custom pattern (use <TOKEN> placeholder)\nEnter choice (1, 2, or 3): ')).trim()
 
     if (authChoice === '2') {
       // Auto-generate secure random token and save as secret
@@ -156,6 +166,30 @@ async function addEntry() {
         if (saveSecret(secretName, token)) {
           auth = `Bearer \${${secretName}}`
           console.log(`Auth set to: Bearer [${secretName}] (token saved securely).`)
+        } else {
+          console.log('Failed to save secret; proceeding without auth.')
+        }
+      } else {
+        console.log('Token not saved.')
+      }
+    } else if (authChoice === '3') {
+      // Auto-generate with custom pattern
+      const pattern = (await askQuestion('Enter auth pattern with <TOKEN> placeholder (e.g., "Bearer <TOKEN>", "<TOKEN>", "X-API-Key: <TOKEN>"): ')).trim()
+      if (!pattern || !pattern.includes('<TOKEN>')) {
+        console.log('Pattern must include <TOKEN> placeholder.')
+        return
+      }
+
+      const token = crypto.randomBytes(32).toString('hex')
+      const secretName = `${id}_AUTH_TOKEN`
+      console.log(`Generated auth token: ${token}`)
+      const confirm = (await askQuestion('Save this token as a secret? (y/n): ')).toLowerCase().trim()
+      if (confirm === 'y') {
+        console.log(`Saving auth token for ${id} as secret ${secretName}...`)
+        if (saveSecret(secretName, token)) {
+          // Replace <TOKEN> with secret placeholder
+          auth = pattern.replace('<TOKEN>', `\${${secretName}}`)
+          console.log(`Auth set to: ${auth.replace(/\$\{[^}]+\}/g, '[$SECRET]')} (token saved securely).`)
         } else {
           console.log('Failed to save secret; proceeding without auth.')
         }
@@ -194,6 +228,7 @@ async function addEntry() {
 
   const newConfig: ServerConfig = { url }
   if (auth) newConfig.auth = auth
+  if (authHeader) newConfig.authHeader = authHeader
   if (Object.keys(headers).length > 0) newConfig.headers = headers
 
   currentConfig[id] = newConfig
@@ -221,11 +256,19 @@ async function modifyEntry() {
   if (!newUrl) newUrl = config.url
 
   const currentAuth = config.auth ? (config.auth.includes('${') ? config.auth : '[sensitive value - migrate to ${SECRET_NAME}]') : 'none'
-  const changeAuthInput = (await askQuestion(`Change auth? (current: ${currentAuth}) (y/n): `)).toLowerCase().trim()
+  const currentAuthHeader = config.authHeader || 'Authorization'
+  const changeAuthInput = (await askQuestion(`Change auth? (current: ${currentAuth}, header: ${currentAuthHeader}) (y/n): `)).toLowerCase().trim()
   let auth = config.auth
+  let authHeader = config.authHeader
 
   if (changeAuthInput === 'y') {
-    const authChoice = (await askQuestion('Choose auth option:\n1. Manual entry\n2. Remove auth\n3. Auto-generate new token\nEnter choice (1, 2, or 3): ')).trim()
+    const changeHeaderInput = (await askQuestion(`Change auth header? (current: ${currentAuthHeader}) (y/n): `)).toLowerCase().trim()
+    if (changeHeaderInput === 'y') {
+      const newHeader = (await askQuestion('Enter new header name (empty for default Authorization): ')).trim()
+      authHeader = newHeader || undefined
+    }
+
+    const authChoice = (await askQuestion('Choose auth option:\n1. Manual entry\n2. Remove auth\n3. Auto-generate new token\n4. Auto-generate with custom pattern (use <TOKEN> placeholder)\nEnter choice (1, 2, 3, or 4): ')).trim()
 
     if (authChoice === '2') {
       auth = undefined
@@ -245,6 +288,30 @@ async function modifyEntry() {
         }
       } else {
         console.log('New token not saved.')
+      }
+    } else if (authChoice === '4') {
+      // Auto-generate with custom pattern
+      const pattern = (await askQuestion('Enter auth pattern with <TOKEN> placeholder (e.g., "Bearer <TOKEN>", "<TOKEN>", "X-API-Key: <TOKEN>"): ')).trim()
+      if (!pattern || !pattern.includes('<TOKEN>')) {
+        console.log('Pattern must include <TOKEN> placeholder.')
+        return
+      }
+
+      const token = crypto.randomBytes(32).toString('hex')
+      const secretName = `${id}_AUTH_TOKEN`
+      console.log(`Generated auth token: ${token}`)
+      const confirm = (await askQuestion('Save this token as a secret? (y/n): ')).toLowerCase().trim()
+      if (confirm === 'y') {
+        console.log(`Saving auth token for ${id} as secret ${secretName}...`)
+        if (saveSecret(secretName, token)) {
+          // Replace <TOKEN> with secret placeholder
+          auth = pattern.replace('<TOKEN>', `\${${secretName}}`)
+          console.log(`Auth set to: ${auth.replace(/\$\{[^}]+\}/g, '[$SECRET]')} (token saved securely).`)
+        } else {
+          console.log('Failed to save secret; proceeding without auth.')
+        }
+      } else {
+        console.log('Token not saved.')
       }
     } else {
       auth = (await askQuestion("Enter new auth header value (e.g., 'Bearer ${API_TOKEN}', empty to remove): ")).trim() || undefined
@@ -278,6 +345,7 @@ async function modifyEntry() {
 
   const updatedConfig: ServerConfig = { url: newUrl }
   if (auth) updatedConfig.auth = auth
+  if (authHeader) updatedConfig.authHeader = authHeader
   if (Object.keys(newHeaders).length > 0) updatedConfig.headers = newHeaders
 
   currentConfig[id] = updatedConfig

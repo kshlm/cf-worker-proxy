@@ -120,7 +120,165 @@ describe('worker', () => {
     expect(response.status).toBe(502)
     expect(await response.text()).toBe('{"error":"Backend unavailable: Target server is unreachable."}')
   })
-  
+
+  it('should work with custom auth header', async () => {
+    vi.mocked(mockEnv.PROXY_SERVERS.get).mockResolvedValue({
+      url: 'https://api.example.com',
+      auth: 'secret-api-key-123',
+      authHeader: 'X-API-Key'
+    })
+
+    const mockResponse = new Response('Success', { status: 200 })
+    mockFetch.mockResolvedValue(mockResponse)
+
+    const request = new Request('https://proxy.example.com/api/users', {
+      headers: { 'X-API-Key': 'secret-api-key-123' }
+    })
+
+    const response = await worker.fetch(request, mockEnv)
+    expect(response.status).toBe(200)
+  })
+
+  it('should return 401 when custom auth header is missing', async () => {
+    vi.mocked(mockEnv.PROXY_SERVERS.get).mockResolvedValue({
+      url: 'https://api.example.com',
+      auth: 'secret-api-key-123',
+      authHeader: 'X-API-Key'
+    })
+
+    const request = new Request('https://proxy.example.com/api/users')
+    const response = await worker.fetch(request, mockEnv)
+    expect(response.status).toBe(401)
+    expect(await response.text()).toBe('{"error":"Unauthorized: Invalid or missing credentials."}')
+  })
+
+  it('should return 401 when custom auth header does not match', async () => {
+    vi.mocked(mockEnv.PROXY_SERVERS.get).mockResolvedValue({
+      url: 'https://api.example.com',
+      auth: 'secret-api-key-123',
+      authHeader: 'X-API-Key'
+    })
+
+    const request = new Request('https://proxy.example.com/api/users', {
+      headers: { 'X-API-Key': 'wrong-key' }
+    })
+    const response = await worker.fetch(request, mockEnv)
+    expect(response.status).toBe(401)
+    expect(await response.text()).toBe('{"error":"Unauthorized: Invalid or missing credentials."}')
+  })
+
+  describe('header forwarding', () => {
+    it('should forward all incoming headers except Authorization header', async () => {
+      vi.mocked(mockEnv.PROXY_SERVERS.get).mockResolvedValue({
+        url: 'https://api.example.com',
+        auth: 'Bearer token123'
+      })
+
+      const mockResponse = new Response('Success', { status: 200 })
+      mockFetch.mockResolvedValue(mockResponse)
+
+      const request = new Request('https://proxy.example.com/api/users', {
+        headers: {
+          'Authorization': 'Bearer token123',
+          'X-Custom-Incoming': 'incoming-value',
+          'Content-Type': 'application/json',
+          'User-Agent': 'test-agent'
+        }
+      })
+
+      const response = await worker.fetch(request, mockEnv)
+      expect(response.status).toBe(200)
+
+      const calledRequest = mockFetch.mock.calls[0][0] as Request
+      expect(calledRequest.headers.get('X-Custom-Incoming')).toBe('incoming-value')
+      expect(calledRequest.headers.get('Content-Type')).toBe('application/json')
+      expect(calledRequest.headers.get('User-Agent')).toBe('test-agent')
+      expect(calledRequest.headers.get('Authorization')).toBeNull()
+    })
+
+    it('should forward all incoming headers except custom auth header', async () => {
+      vi.mocked(mockEnv.PROXY_SERVERS.get).mockResolvedValue({
+        url: 'https://api.example.com',
+        auth: 'secret-key',
+        authHeader: 'X-API-Key'
+      })
+
+      const mockResponse = new Response('Success', { status: 200 })
+      mockFetch.mockResolvedValue(mockResponse)
+
+      const request = new Request('https://proxy.example.com/api/users', {
+        headers: {
+          'X-API-Key': 'secret-key',
+          'X-Custom-Incoming': 'incoming-value',
+          'Authorization': 'Bearer should-pass-through',
+          'Content-Type': 'application/json'
+        }
+      })
+
+      const response = await worker.fetch(request, mockEnv)
+      expect(response.status).toBe(200)
+
+      const calledRequest = mockFetch.mock.calls[0][0] as Request
+      expect(calledRequest.headers.get('X-Custom-Incoming')).toBe('incoming-value')
+      expect(calledRequest.headers.get('Authorization')).toBe('Bearer should-pass-through')
+      expect(calledRequest.headers.get('Content-Type')).toBe('application/json')
+      expect(calledRequest.headers.get('X-API-Key')).toBeNull()
+    })
+
+    it('should add configured headers only when they dont exist in incoming request', async () => {
+      vi.mocked(mockEnv.PROXY_SERVERS.get).mockResolvedValue({
+        url: 'https://api.example.com',
+        headers: {
+          'X-Config-Header': 'config-value',
+          'X-Override-Test': 'config-value'
+        }
+      })
+
+      const mockResponse = new Response('Success', { status: 200 })
+      mockFetch.mockResolvedValue(mockResponse)
+
+      const request = new Request('https://proxy.example.com/api/users', {
+        headers: {
+          'X-Override-Test': 'incoming-value',
+          'X-Incoming-Only': 'incoming-value'
+        }
+      })
+
+      const response = await worker.fetch(request, mockEnv)
+      expect(response.status).toBe(200)
+
+      const calledRequest = mockFetch.mock.calls[0][0] as Request
+      expect(calledRequest.headers.get('X-Config-Header')).toBe('config-value')
+      expect(calledRequest.headers.get('X-Override-Test')).toBe('incoming-value')
+      expect(calledRequest.headers.get('X-Incoming-Only')).toBe('incoming-value')
+    })
+
+    it('should preserve case-insensitive header comparison for auth header exclusion', async () => {
+      vi.mocked(mockEnv.PROXY_SERVERS.get).mockResolvedValue({
+        url: 'https://api.example.com',
+        auth: 'token123',
+        authHeader: 'x-api-key'
+      })
+
+      const mockResponse = new Response('Success', { status: 200 })
+      mockFetch.mockResolvedValue(mockResponse)
+
+      const request = new Request('https://proxy.example.com/api/users', {
+        headers: {
+          'X-API-Key': 'token123',
+          'X-Other': 'value'
+        }
+      })
+
+      const response = await worker.fetch(request, mockEnv)
+      expect(response.status).toBe(200)
+
+      const calledRequest = mockFetch.mock.calls[0][0] as Request
+      expect(calledRequest.headers.get('X-Other')).toBe('value')
+      expect(calledRequest.headers.get('X-API-Key')).toBeNull()
+    })
+  })
+
   describe('secret interpolation', () => {
     const configWithSecrets = {
       url: 'https://api.example.com',

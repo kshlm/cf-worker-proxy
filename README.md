@@ -62,6 +62,11 @@ The proxy configuration is stored in KV under the `servers` key. Here's an examp
     "headers": {
       "X-CDN": "true"
     }
+  },
+  "custom-auth": {
+    "url": "https://secure-api.example.com",
+    "auth": "secret-api-key-123",
+    "authHeader": "X-API-Key"
   }
 }
 ```
@@ -72,7 +77,8 @@ Each server configuration supports:
 
 - `url` (required): Base URL of the downstream server (must be HTTPS)
 - `headers` (optional): Custom headers to add to outgoing requests
-- `auth` (optional): Required Authorization header value for incoming requests
+- `auth` (optional): Required authentication header value for incoming requests
+- `authHeader` (optional): Custom header name for authentication (defaults to `Authorization`)
 
 ### Request Routing
 
@@ -80,15 +86,60 @@ Each server configuration supports:
 - Request to `/web/dashboard` → routes to `web` server → `https://web.example.com/dashboard`
 - Request to `/images/photo.jpg` → routes to `images` server → `https://cdn.example.com/photo.jpg`
 
+### Header Forwarding
+
+The proxy forwards headers as follows:
+
+- **All incoming headers** are passed to the downstream server **except** the authentication header
+  - Default: `Authorization` header is not forwarded
+  - Custom: If `authHeader` is configured, that header is not forwarded instead
+- **Configured headers** are added only if they don't already exist in the incoming request
+  - Incoming headers take priority over configured headers
+  - This allows clients to override default headers when needed
+
+**Example:**
+```json
+{
+  "api": {
+    "url": "https://api.example.com",
+    "headers": { "X-Default": "config-value" },
+    "auth": "Bearer token123"
+  }
+}
+```
+
+- Request with `X-Default: client-value` → downstream receives `X-Default: client-value` (client wins)
+- Request without `X-Default` → downstream receives `X-Default: config-value` (config provides default)
+- `Authorization` header is never forwarded to the downstream server
+
 ### Authentication
 
-If a server has an `auth` configuration, incoming requests must include a matching `Authorization` header:
+If a server has an `auth` configuration, incoming requests must include a matching authentication header. By default, this is the `Authorization` header:
 
+#### Default Authorization Header
 ```
 Authorization: Bearer required-token
 ```
 
-If the header is missing or doesn't match, the proxy returns a 401 Unauthorized response.
+#### Custom Authentication Header
+You can also specify a custom header name using `authHeader`:
+
+```json
+{
+  "api": {
+    "url": "https://api.example.com",
+    "auth": "secret-api-key-123",
+    "authHeader": "X-API-Key"
+  }
+}
+```
+
+Then the incoming request must include:
+```
+X-API-Key: secret-api-key-123
+```
+
+If the required header is missing or doesn't match, the proxy returns a 401 Unauthorized response.
 
 ## Development
 

@@ -25,8 +25,9 @@ Worker Proxy is a Cloudflare Worker that serves as a reverse proxy, routing inco
   interface ServerConfig {
     url: string; // Base URL of the downstream server (e.g., 'https://api.example.com')
     headers?: Record<string, string>; // Custom headers to add (e.g., { 'Authorization': 'Bearer ${API_TOKEN}' })
-    auth?: string; // Required Authorization header value for this server (e.g., 'Bearer ${REQUIRED_AUTH}')
-    
+    auth?: string; // Required authentication header value for this server (e.g., 'Bearer ${REQUIRED_AUTH}', 'secret-key-123')
+    authHeader?: string; // Custom header name for authentication (defaults to 'Authorization') (e.g., 'X-API-Key')
+
     Note: Both `auth` and header values support interpolation using Worker Secrets.
     Use placeholders like `${SECRET_NAME}` which will be replaced with the value from `env.SECRET_NAME` at runtime.
     This allows storing sensitive tokens as Cloudflare Worker Secrets instead of plain text in KV.
@@ -40,6 +41,11 @@ Worker Proxy is a Cloudflare Worker that serves as a reverse proxy, routing inco
       "headers": { "X-Custom": "value", "Authorization": "Bearer ${API_AUTH_TOKEN}" },
       "auth": "Bearer ${REQUIRED_AUTH_TOKEN}"
     },
+    "secure-api": {
+      "url": "https://secure-api.backend.com",
+      "auth": "${SECRET_API_KEY}",
+      "authHeader": "X-API-Key"
+    },
     "web": {
       "url": "https://web.backend.com"
     }
@@ -48,7 +54,9 @@ Worker Proxy is a Cloudflare Worker that serves as a reverse proxy, routing inco
 
 ## 3. Authentication and Authorization
 - For servers with `auth` configured:
-  - Extracts `Authorization` header from incoming request.
+  - Extracts the authentication header from incoming request:
+    - Uses `config.authHeader` if specified (e.g., "X-API-Key")
+    - Defaults to "Authorization" header if `authHeader` not specified
   - Compares it exactly with the configured `auth` value (case-sensitive, no hashing for simplicity).
   - If mismatch or absent, returns HTTP 401 Unauthorized with message "Authentication required".
    - No auth required if not specified in config.
@@ -56,8 +64,12 @@ Worker Proxy is a Cloudflare Worker that serves as a reverse proxy, routing inco
 ### 4. Request Forwarding
 - Constructs backend URL: `config.url + '/' + remainingPath + search` (where `remainingPath` is the original path minus the first segment).
 - Preserves original query parameters (`search`).
-- Method, body, and non-auth headers are forwarded as-is.
-- Adds config `headers` to the outgoing request.
+- Method and body are forwarded as-is.
+- All incoming headers are forwarded downstream **except** the authentication header:
+  - If `authHeader` is configured, that header is excluded (e.g., "X-API-Key")
+  - If not configured, the "Authorization" header is excluded
+- Configured headers are added only if they don't already exist in the incoming request
+  - Incoming headers take priority over configured headers
   - Interpolates any secrets in the config `headers`
 - Forwards the response from backend unchanged (status, headers, body).
 - Handles CORS: Adds appropriate headers if needed, but proxies handle this.
@@ -75,7 +87,7 @@ Worker Proxy is a Cloudflare Worker that serves as a reverse proxy, routing inco
 4. If no `serverKey` or empty path, return 404.
 5. Retrieve config: `await env.KV.get('servers', { type: 'json' })`, then `config = servers[serverKey]`.
 6. If no config, return 404 "Server not found".
-7. Auth check: If `config.auth`, compare `request.headers.get('Authorization')` === `config.auth`; else 401.
+7. Auth check: If `config.auth`, compare `request.headers.get(config.authHeader || 'Authorization')` === `config.auth`; else 401.
 8. Build backend URL: `${config.url}/${pathname.slice(serverKey.length + 1)}${search}`.
 9. Clone request, set `url` to backend URL, add `config.headers`.
 10. `response = await fetch(modifiedRequest)`.
