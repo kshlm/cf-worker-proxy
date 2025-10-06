@@ -149,8 +149,6 @@ export class RequestProcessor {
       processedConfig
     );
 
-    console.debug(`[downstream] ${JSON.stringify(Object.fromEntries(processedHeaders.entries()))}`);
-
     // Create and return the modified request
     return new Request(targetUrl, {
       method: originalRequest.method,
