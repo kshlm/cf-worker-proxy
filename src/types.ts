@@ -14,16 +14,6 @@ export interface Env {
   [key: string]: string | KVNamespace | undefined
 }
 
-/**
- * Enhanced type for processed server configuration with interpolated secrets
- */
-export interface ProcessedServerConfig extends ServerConfig {
-  // Same as ServerConfig but all secrets have been interpolated
-}
-
-/**
- * Request processing context for better type safety
- */
 export interface RequestContext {
   request: Request
   serverKey: string
@@ -31,19 +21,13 @@ export interface RequestContext {
   originalUrl: string
 }
 
-/**
- * Error details for better error handling
- */
 export interface ErrorDetails {
   message: string
   status: number
   context?: string
 }
 
-/**
- * KV operation result wrapper
- */
-export interface KVOperationResult<T = any> {
+export interface KVOperationResult<T = unknown> {
   success: boolean
   data?: T
   error?: string

@@ -1,5 +1,5 @@
 import { Env } from './types'
-import { requestProcessor } from './request-processor'
+import { processRequest } from './request-processor'
 
 /**
  * Cloudflare Worker proxy server that routes requests to downstream services.
@@ -20,6 +20,6 @@ export default {
    * @returns Promise resolving to the HTTP response
    */
   async fetch(request: Request, env: Env): Promise<Response> {
-    return await requestProcessor.processRequest(request, env)
+    return await processRequest(request, env)
   }
 }
