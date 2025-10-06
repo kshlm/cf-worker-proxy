@@ -67,6 +67,24 @@ The proxy configuration is stored in KV under the `servers` key. Here's an examp
     "url": "https://secure-api.example.com",
     "auth": "secret-api-key-123",
     "authHeader": "X-API-Key"
+  },
+  "multi-auth": {
+    "url": "https://flexible-api.example.com",
+    "authConfigs": [
+      {
+        "header": "Authorization",
+        "value": "Bearer bearer-token-123"
+      },
+      {
+        "header": "X-API-Key",
+        "value": "secret-key-456"
+      },
+      {
+        "header": "X-Service-Token",
+        "value": "service-token-789",
+        "required": true
+      }
+    ]
   }
 }
 ```
@@ -77,8 +95,27 @@ Each server configuration supports:
 
 - `url` (required): Base URL of the downstream server (must be HTTPS)
 - `headers` (optional): Custom headers to add to outgoing requests
-- `auth` (optional): Required authentication header value for incoming requests
-- `authHeader` (optional): Custom header name for authentication (defaults to `Authorization`)
+- `auth` (optional): Required authentication header value for incoming requests (legacy)
+- `authHeader` (optional): Custom header name for authentication (defaults to `Authorization`) (legacy)
+- `authConfigs` (optional): Array of multiple authentication configurations (new)
+
+#### Multiple Authentication Headers
+
+The new `authConfigs` array supports multiple authentication methods with the following schema:
+
+```typescript
+interface AuthConfig {
+  header: string        // Header name (e.g., "Authorization", "X-API-Key")
+  value: string         // Expected header value
+  required?: boolean    // Whether this header is required (defaults to false)
+}
+```
+
+**Authentication Logic:**
+- **Any One Match**: Access is granted if any configured auth header matches
+- **Required Headers**: When `required: true`, that specific header must be present and match
+- **Optional Headers**: When `required: false` (default), the header is optional
+- **No Auth Headers Present**: If all headers are optional and none are present, access is granted
 
 ### Request Routing
 
@@ -90,9 +127,10 @@ Each server configuration supports:
 
 The proxy forwards headers as follows:
 
-- **All incoming headers** are passed to the downstream server **except** the authentication header
+- **All incoming headers** are passed to the downstream server **except** the authentication headers
   - Default: `Authorization` header is not forwarded
   - Custom: If `authHeader` is configured, that header is not forwarded instead
+  - Multiple: All headers configured in `authConfigs` are not forwarded
 - **Configured headers** are added only if they don't already exist in the incoming request
   - Incoming headers take priority over configured headers
   - This allows clients to override default headers when needed
@@ -111,6 +149,22 @@ The proxy forwards headers as follows:
 - Request with `X-Default: client-value` → downstream receives `X-Default: client-value` (client wins)
 - Request without `X-Default` → downstream receives `X-Default: config-value` (config provides default)
 - `Authorization` header is never forwarded to the downstream server
+
+**Multiple Auth Headers Example:**
+```json
+{
+  "multi-auth": {
+    "url": "https://api.example.com",
+    "authConfigs": [
+      { "header": "Authorization", "value": "Bearer token123" },
+      { "header": "X-API-Key", "value": "key456" }
+    ]
+  }
+}
+```
+
+- Request with both auth headers → downstream receives neither `Authorization` nor `X-API-Key`
+- Both authentication headers are removed for security before forwarding to the downstream server
 
 ### Authentication
 
@@ -140,6 +194,87 @@ X-API-Key: secret-api-key-123
 ```
 
 If the required header is missing or doesn't match, the proxy returns a 401 Unauthorized response.
+
+#### Multiple Authentication Examples
+
+**Example 1: Any One Valid Header**
+```json
+{
+  "flexible-api": {
+    "url": "https://api.example.com",
+    "authConfigs": [
+      { "header": "Authorization", "value": "Bearer token123" },
+      { "header": "X-API-Key", "value": "key456" }
+    ]
+  }
+}
+```
+- Request with `Authorization: Bearer token123` → ✅ Success
+- Request with `X-API-Key: key456` → ✅ Success
+- Request with `Authorization: wrong` → ❌ 401 Unauthorized
+- Request with no auth headers → ✅ Success (all optional)
+
+**Example 2: Required + Optional Headers**
+```json
+{
+  "secure-api": {
+    "url": "https://api.example.com",
+    "authConfigs": [
+      { "header": "X-Service-Token", "value": "service789", "required": true },
+      { "header": "Authorization", "value": "Bearer token123" }
+    ]
+  }
+}
+```
+- Request with `X-Service-Token: service789` → ✅ Success
+- Request with `Authorization: Bearer token123` → ❌ 401 Unauthorized (missing required)
+- Request with both headers → ✅ Success
+- Request with no headers → ❌ 401 Unauthorized (missing required)
+
+#### Backward Compatibility & Migration
+
+**Legacy configurations continue to work unchanged:**
+```json
+{
+  "legacy-api": {
+    "url": "https://api.example.com",
+    "auth": "Bearer required-token",
+    "authHeader": "Authorization"
+  }
+}
+```
+
+**Mixed configurations (legacy + new):**
+```json
+{
+  "mixed-api": {
+    "url": "https://api.example.com",
+    "auth": "Bearer legacy-token",
+    "authHeader": "X-Legacy-Auth",
+    "authConfigs": [
+      { "header": "Authorization", "value": "Bearer new-token" }
+    ]
+  }
+}
+```
+- Both `Authorization: Bearer new-token` and `X-Legacy-Auth: Bearer legacy-token` will work
+- If header names conflict, `authConfigs` takes precedence
+
+**Migration from legacy to new format:**
+```json
+// Before (legacy)
+{
+  "auth": "Bearer token123",
+  "authHeader": "X-API-Key"
+}
+
+// After (new)
+{
+  "authConfigs": [
+    { "header": "X-API-Key", "value": "Bearer token123", "required": true }
+  ]
+}
+```
 
 ## Development
 

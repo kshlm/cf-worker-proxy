@@ -1,8 +1,15 @@
+export interface AuthConfig {
+  header: string
+  value: string
+  required?: boolean
+}
+
 export interface ServerConfig {
   url: string
   headers?: Record<string, string>
   auth?: string
   authHeader?: string
+  authConfigs?: AuthConfig[]
 }
 
 export interface ServersConfig {

@@ -1,5 +1,6 @@
-import { ServerConfig } from './types';
+import { ServerConfig, AuthConfig } from './types';
 import { DEFAULT_HEADERS } from './constants';
+import { mergeAuthConfigs, createHeaderExclusionSet, createHeadersExcluding } from './utils/auth-helpers';
 
 /**
  * Finds a header value case-insensitively from request headers
@@ -10,22 +11,25 @@ export function findHeaderValue(headers: Headers, headerName: string): string | 
 
 /**
  * Creates a new Headers object by copying all headers from the original request
- * except the specified authentication header
+ * except the specified authentication header(s)
  */
 export function createHeadersWithoutAuth(
   originalHeaders: Headers,
-  authHeaderName: string = DEFAULT_HEADERS.AUTHORIZATION
+  authHeaderOrConfigs: string | AuthConfig[],
+  defaultAuthHeader: string = DEFAULT_HEADERS.AUTHORIZATION
 ): Headers {
-  const modifiedHeaders = new Headers();
-  const excludeHeaderName = authHeaderName.toLowerCase();
+  let excludeHeaders: Set<string>;
 
-  originalHeaders.forEach((value, key) => {
-    if (key.toLowerCase() !== excludeHeaderName) {
-      modifiedHeaders.set(key, value);
-    }
-  });
+  if (Array.isArray(authHeaderOrConfigs)) {
+    // Multiple auth configs
+    excludeHeaders = createHeaderExclusionSet(authHeaderOrConfigs);
+  } else {
+    // Single auth header (legacy support)
+    const headerName = authHeaderOrConfigs || defaultAuthHeader;
+    excludeHeaders = new Set([headerName.toLowerCase()]);
+  }
 
-  return modifiedHeaders;
+  return createHeadersExcluding(originalHeaders, excludeHeaders);
 }
 
 /**
@@ -52,20 +56,20 @@ export function addCustomHeaders(
 
 /**
  * Processes headers for a proxy request by:
- * 1. Copying all incoming headers except the auth header
+ * 1. Copying all incoming headers except the auth headers
  * 2. Adding custom headers from configuration (only if not present in processed headers)
  */
 export function processHeadersForProxy(
   originalRequest: Request,
   serverConfig: ServerConfig
 ): Headers {
-  const authHeaderName = serverConfig.authHeader || DEFAULT_HEADERS.AUTHORIZATION;
+  // Merge auth configurations
+  const authConfigs = mergeAuthConfigs(serverConfig);
 
-  // Create headers without the authentication header
-  const processedHeaders = createHeadersWithoutAuth(
-    originalRequest.headers,
-    authHeaderName
-  );
+  // Create headers without authentication headers
+  const processedHeaders = authConfigs.length > 0
+    ? createHeadersWithoutAuth(originalRequest.headers, authConfigs)
+    : createHeadersWithoutAuth(originalRequest.headers, serverConfig.authHeader || DEFAULT_HEADERS.AUTHORIZATION);
 
   // Add custom headers from configuration
   addCustomHeaders(
@@ -89,18 +93,8 @@ export function isValidHeaderName(headerName: string): boolean {
   return /^[a-zA-Z0-9!#$%&'*+.^_`|~-]+$/.test(headerName);
 }
 
-/**
- * Validates header value format
- */
-export function isValidHeaderValue(headerValue: string): boolean {
-  if (typeof headerValue !== 'string') {
-    return false;
-  }
-
-  // Basic validation - header values should not contain control characters
-  // except for tab (0x09) and space (0x20)
-  return !/[\x00-\x08\x0A-\x1F\x7F]/u.test(headerValue);
-}
+// Re-export isValidHeaderValue from utils for backward compatibility
+export { isValidHeaderValue } from './utils/auth-helpers';
 
 /**
  * Gets all header names from a headers object in a case-insensitive manner

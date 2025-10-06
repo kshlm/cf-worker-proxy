@@ -1,4 +1,5 @@
-import { ServerConfig, ErrorDetails } from './types';
+import { ServerConfig, ErrorDetails, AuthConfig } from './types';
+import { isValidHeaderValue } from './utils/auth-helpers';
 import { PROTOCOLS } from './constants';
 
 /**
@@ -54,9 +55,113 @@ export function validateBackendUrl(url: string): ValidationResult {
 }
 
 /**
- * Validates authentication configuration
+ * Validates a single AuthConfig
  */
-export function validateAuthentication(auth?: string, authHeader?: string): ValidationResult {
+export function validateAuthConfig(authConfig: AuthConfig): ValidationResult {
+  // Validate header name
+  if (!authConfig.header || authConfig.header.trim() === '') {
+    return {
+      isValid: false,
+      error: {
+        message: 'Configuration invalid: Auth header name cannot be empty.',
+        status: 500,
+        context: 'AuthConfig.header is required but empty'
+      }
+    };
+  }
+
+  // Check for valid header name format (basic validation)
+  if (!/^[a-zA-Z0-9!#$%&'*+.^_`|~-]+$/.test(authConfig.header)) {
+    return {
+      isValid: false,
+      error: {
+        message: 'Configuration invalid: Auth header name contains invalid characters.',
+        status: 500,
+        context: `AuthConfig.header "${authConfig.header}" contains invalid characters`
+      }
+    };
+  }
+
+  // Validate header value
+  if (!authConfig.value || authConfig.value.trim() === '') {
+    return {
+      isValid: false,
+      error: {
+        message: 'Configuration invalid: Auth header value cannot be empty.',
+        status: 500,
+        context: `AuthConfig.value for header "${authConfig.header}" is required but empty`
+      }
+    };
+  }
+
+  // Validate header value format
+  if (!isValidHeaderValue(authConfig.value)) {
+    return {
+      isValid: false,
+      error: {
+        message: 'Configuration invalid: Auth header value contains invalid characters.',
+        status: 500,
+        context: `AuthConfig.value for header "${authConfig.header}" contains invalid characters`
+      }
+    };
+  }
+
+  return { isValid: true };
+}
+
+/**
+ * Validates authConfigs array
+ */
+export function validateAuthConfigs(authConfigs?: AuthConfig[]): ValidationResult {
+  if (!authConfigs) {
+    return { isValid: true }; // No auth configs
+  }
+
+  // Check if authConfigs is an array
+  if (!Array.isArray(authConfigs)) {
+    return {
+      isValid: false,
+      error: {
+        message: 'Configuration invalid: authConfigs must be an array.',
+        status: 500,
+        context: 'authConfigs is not an array'
+      }
+    };
+  }
+
+  // Validate each auth config
+  for (const [index, authConfig] of authConfigs.entries()) {
+    const validation = validateAuthConfig(authConfig);
+    if (!validation.isValid) {
+      return {
+        isValid: false,
+        error: {
+          ...validation.error!,
+          context: `${validation.error!.context} (at index ${index})`
+        }
+      };
+    }
+  }
+
+  return { isValid: true };
+}
+
+/**
+ * Validates authentication configuration (legacy and new)
+ */
+export function validateAuthentication(auth?: string, authHeader?: string, authConfigs?: AuthConfig[]): ValidationResult {
+  // Validate new authConfigs first
+  const authConfigsValidation = validateAuthConfigs(authConfigs);
+  if (!authConfigsValidation.isValid) {
+    return authConfigsValidation;
+  }
+
+  // If authConfigs exist, we don't need to validate legacy auth
+  if (authConfigs && authConfigs.length > 0) {
+    return { isValid: true };
+  }
+
+  // Validate legacy auth
   if (!auth) {
     return { isValid: true }; // No authentication required
   }
@@ -101,6 +206,7 @@ export function validateAuthentication(auth?: string, authHeader?: string): Vali
 
   return { isValid: true };
 }
+
 
 /**
  * Validates custom headers configuration
@@ -162,8 +268,8 @@ export function validateProcessedConfig(config: ServerConfig): ValidationResult 
     return urlValidation;
   }
 
-  // Validate authentication
-  const authValidation = validateAuthentication(config.auth, config.authHeader);
+  // Validate authentication (both legacy and new)
+  const authValidation = validateAuthentication(config.auth, config.authHeader, config.authConfigs);
   if (!authValidation.isValid) {
     return authValidation;
   }

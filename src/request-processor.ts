@@ -1,7 +1,8 @@
-import { Env, ServerConfig, RequestContext, KVOperationResult } from './types';
+import { Env, ServerConfig, RequestContext, KVOperationResult, AuthConfig } from './types';
 import { processServerConfig } from './secret-interpolation';
 import { validateProcessedConfig } from './config-validator';
 import { processHeadersForProxy } from './header-processor';
+import { mergeAuthConfigs } from './utils/auth-helpers';
 import {
   createInvalidRouteResponse,
   createServerNotFoundResponse,
@@ -9,9 +10,9 @@ import {
   createConfigInvalidResponse,
   createUnauthorizedResponse,
   createBackendUnavailableResponse,
-  createInternalServerErrorResponse,
-  DEFAULT_HEADERS
+  createInternalServerErrorResponse
 } from './constants';
+
 
 /**
  * Extracts the first path segment from a URL pathname to use as server key.
@@ -40,24 +41,44 @@ function buildBackendUrl(baseUrl: string, originalUrl: string, serverKey: string
 }
 
 /**
- * Checks if the incoming request has valid authentication.
+ * Checks if the incoming request has valid authentication using "any one match" logic.
  */
-function checkAuth(request: Request, requiredAuth?: string, authHeaderName?: string): boolean {
-  if (!requiredAuth) {
+function checkAuth(request: Request, authConfigs: AuthConfig[]): boolean {
+  if (authConfigs.length === 0) {
     return true
   }
 
-  const headerName = authHeaderName || DEFAULT_HEADERS.AUTHORIZATION
+  // Check if any required auth header is missing
+  const hasMissingRequired = authConfigs.some(config => {
+    if (config.required !== true) return false
 
-  let authHeaderValue = null
-  for (const [key, value] of request.headers.entries()) {
-    if (key.toLowerCase() === headerName.toLowerCase()) {
-      authHeaderValue = value
-      break
-    }
+    const headerValue = request.headers.get(config.header)
+    return !headerValue
+  })
+
+  if (hasMissingRequired) {
+    return false
   }
 
-  return authHeaderValue === requiredAuth
+  // Check if any auth header matches (any one match is sufficient)
+  const hasValidMatch = authConfigs.some(config => {
+    const headerValue = request.headers.get(config.header)
+    if (!headerValue) return false
+    return headerValue === config.value
+  })
+
+  // If any header matches, allow access
+  if (hasValidMatch) {
+    return true
+  }
+
+  // If no headers match, only allow access if all headers are optional AND no auth headers are present
+  const allOptional = authConfigs.every(config => config.required !== true)
+  const hasAnyAuthHeader = authConfigs.some(config =>
+    request.headers.has(config.header)
+  )
+
+  return allOptional && !hasAnyAuthHeader
 }
 
 /**
@@ -155,9 +176,10 @@ export async function processRequest(request: Request, env: Env): Promise<Respon
     }
 
     // Check authentication
-    if (!checkAuth(request, processedConfig.auth, processedConfig.authHeader)) {
-      const authHeaderName = processedConfig.authHeader || 'Authorization';
-      console.warn(`Authentication failed for server "${requestContext.serverKey}" using ${authHeaderName} header`);
+    const mergedAuthConfigs = mergeAuthConfigs(processedConfig);
+    if (!checkAuth(request, mergedAuthConfigs)) {
+      const authHeaders = mergedAuthConfigs.map(config => config.header).join(', ');
+      console.warn(`Authentication failed for server "${requestContext.serverKey}" using headers: ${authHeaders}`);
       return createUnauthorizedResponse();
     }
 

@@ -22,13 +22,24 @@ Worker Proxy is a Cloudflare Worker that serves as a reverse proxy, routing inco
  Key structure: Individual keys like per configured proxy server, eg. `api`
  Values: `ServerConfig` objects serialized into JSON
   ```typescript
+  interface AuthConfig {
+    header: string;        // Header name (e.g., "Authorization", "X-API-Key")
+    value: string;         // Expected header value
+    required?: boolean;    // Whether this header is required (defaults to false)
+  }
+
   interface ServerConfig {
     url: string; // Base URL of the downstream server (e.g., 'https://api.example.com')
     headers?: Record<string, string>; // Custom headers to add (e.g., { 'Authorization': 'Bearer ${API_TOKEN}' })
+
+    // Legacy single-header authentication (deprecated for new configs)
     auth?: string; // Required authentication header value for this server (e.g., 'Bearer ${REQUIRED_AUTH}', 'secret-key-123')
     authHeader?: string; // Custom header name for authentication (defaults to 'Authorization') (e.g., 'X-API-Key')
 
-    Note: Both `auth` and header values support interpolation using Worker Secrets.
+    // New multi-header authentication
+    authConfigs?: AuthConfig[]; // Array of authentication configurations supporting multiple valid headers
+
+    Note: Both `auth`, `authConfig.value`, and header values support interpolation using Worker Secrets.
     Use placeholders like `${SECRET_NAME}` which will be replaced with the value from `env.SECRET_NAME` at runtime.
     This allows storing sensitive tokens as Cloudflare Worker Secrets instead of plain text in KV.
   }
@@ -46,6 +57,14 @@ Worker Proxy is a Cloudflare Worker that serves as a reverse proxy, routing inco
       "auth": "${SECRET_API_KEY}",
       "authHeader": "X-API-Key"
     },
+    "multi-auth-api": {
+      "url": "https://flexible-api.backend.com",
+      "authConfigs": [
+        { "header": "Authorization", "value": "Bearer ${BEARER_TOKEN}" },
+        { "header": "X-API-Key", "value": "${API_KEY}" },
+        { "header": "X-Service-Token", "value": "${SERVICE_TOKEN}", "required": true }
+      ]
+    },
     "web": {
       "url": "https://web.backend.com"
     }
@@ -53,21 +72,54 @@ Worker Proxy is a Cloudflare Worker that serves as a reverse proxy, routing inco
   ```
 
 ## 3. Authentication and Authorization
-- For servers with `auth` configured:
+
+### Legacy Single-Header Authentication
+- For servers with legacy `auth` configured:
   - Extracts the authentication header from incoming request:
     - Uses `config.authHeader` if specified (e.g., "X-API-Key")
     - Defaults to "Authorization" header if `authHeader` not specified
   - Compares it exactly with the configured `auth` value (case-sensitive, no hashing for simplicity).
   - If mismatch or absent, returns HTTP 401 Unauthorized with message "Authentication required".
-   - No auth required if not specified in config.
+
+### Multi-Header Authentication
+- For servers with `authConfigs` configured:
+  - Supports multiple valid authentication headers simultaneously
+  - **"Any One Match" Logic**: Access granted if ANY configured auth header matches
+    - Check each `AuthConfig` in order
+    - Compare request header value exactly with configured `value`
+    - If any match succeeds, authentication passes
+  - **Required Headers**:
+    - When `required: true`, that specific header must be present and match
+    - If any required header is missing, authentication fails immediately
+  - **Optional Headers**:
+    - When `required: false` (default), the header is optional
+    - Missing optional headers don't cause authentication failure
+  - **No Auth Headers Present**:
+    - If all headers are optional and none are present, authentication succeeds
+    - If any headers are required and missing, authentication fails
+
+### Backward Compatibility
+- Legacy `auth`/`authHeader` configurations continue to work unchanged
+- Mixed configurations (legacy + new) are supported:
+  - Legacy auth is merged into `authConfigs` if no header name conflict exists
+  - `authConfigs` takes precedence when header names conflict
+- Legacy auth is required by default when no `authConfigs` present
+- Legacy auth becomes optional when mixed with `authConfigs`
+
+### Error Responses
+- Returns HTTP 401 Unauthorized with message "Authentication required" when authentication fails
+- Provides detailed error logging for debugging (without exposing sensitive values)
+- No auth required if neither `auth` nor `authConfigs` are specified in config.
 
 ### 4. Request Forwarding
 - Constructs backend URL: `config.url + '/' + remainingPath + search` (where `remainingPath` is the original path minus the first segment).
 - Preserves original query parameters (`search`).
 - Method and body are forwarded as-is.
-- All incoming headers are forwarded downstream **except** the authentication header:
-  - If `authHeader` is configured, that header is excluded (e.g., "X-API-Key")
-  - If not configured, the "Authorization" header is excluded
+- All incoming headers are forwarded downstream **except** the authentication headers:
+  - **Legacy**: If `authHeader` is configured, that header is excluded (e.g., "X-API-Key")
+  - **Legacy**: If not configured, the "Authorization" header is excluded
+  - **Multi-Auth**: All headers configured in `authConfigs` are excluded for security
+  - **Mixed**: All configured headers from both legacy and new authentication methods are excluded
 - Configured headers are added only if they don't already exist in the incoming request
   - Incoming headers take priority over configured headers
   - Interpolates any secrets in the config `headers`
@@ -87,11 +139,18 @@ Worker Proxy is a Cloudflare Worker that serves as a reverse proxy, routing inco
 4. If no `serverKey` or empty path, return 404.
 5. Retrieve config: `await env.KV.get('servers', { type: 'json' })`, then `config = servers[serverKey]`.
 6. If no config, return 404 "Server not found".
-7. Auth check: If `config.auth`, compare `request.headers.get(config.authHeader || 'Authorization')` === `config.auth`; else 401.
+7. **Authentication Check**:
+   - Merge legacy `auth`/`authHeader` with `authConfigs` (if present) to create unified auth array
+   - If no authentication configured, skip to step 8
+   - Check for required headers: if any `required: true` header is missing, return 401
+   - Check for valid matches: if ANY configured header matches request header value, authentication passes
+   - If no matches and all headers are optional with none present, authentication passes
+   - Otherwise, return 401 "Authentication required"
 8. Build backend URL: `${config.url}/${pathname.slice(serverKey.length + 1)}${search}`.
 9. Clone request, set `url` to backend URL, add `config.headers`.
-10. `response = await fetch(modifiedRequest)`.
-11. Return `response`.
+10. Remove all authentication headers from the cloned request for security.
+11. `response = await fetch(modifiedRequest)`.
+12. Return `response`.
 
 ## Non-Functional Requirements
 - **Performance**: Sub-100ms latency target; leverage Workers' global edge network.
