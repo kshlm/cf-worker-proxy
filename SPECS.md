@@ -25,7 +25,6 @@ Worker Proxy is a Cloudflare Worker that serves as a reverse proxy, routing inco
   interface AuthConfig {
     header: string;        // Header name (e.g., "Authorization", "X-API-Key")
     value: string;         // Expected header value
-    required?: boolean;    // Whether this header is required (defaults to false)
   }
 
   interface ServerConfig {
@@ -61,8 +60,7 @@ Worker Proxy is a Cloudflare Worker that serves as a reverse proxy, routing inco
       "url": "https://flexible-api.backend.com",
       "authConfigs": [
         { "header": "Authorization", "value": "Bearer ${BEARER_TOKEN}" },
-        { "header": "X-API-Key", "value": "${API_KEY}" },
-        { "header": "X-Service-Token", "value": "${SERVICE_TOKEN}", "required": true }
+        { "header": "X-API-Key", "value": "${API_KEY}" }
       ]
     },
     "web": {
@@ -88,23 +86,14 @@ Worker Proxy is a Cloudflare Worker that serves as a reverse proxy, routing inco
     - Check each `AuthConfig` in order
     - Compare request header value exactly with configured `value`
     - If any match succeeds, authentication passes
-  - **Required Headers**:
-    - When `required: true`, that specific header must be present and match
-    - If any required header is missing, authentication fails immediately
-  - **Optional Headers**:
-    - When `required: false` (default), the header is optional
-    - Missing optional headers don't cause authentication failure
   - **No Auth Headers Present**:
-    - If all headers are optional and none are present, authentication succeeds
-    - If any headers are required and missing, authentication fails
+    - If no auth headers are configured, authentication succeeds
 
 ### Backward Compatibility
 - Legacy `auth`/`authHeader` configurations continue to work unchanged
 - Mixed configurations (legacy + new) are supported:
   - Legacy auth is merged into `authConfigs` if no header name conflict exists
   - `authConfigs` takes precedence when header names conflict
-- Legacy auth is required by default when no `authConfigs` present
-- Legacy auth becomes optional when mixed with `authConfigs`
 
 ### Error Responses
 - Returns HTTP 401 Unauthorized with message "Authentication required" when authentication fails

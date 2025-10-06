@@ -1,4 +1,4 @@
-import { Env, ServerConfig } from './types';
+import { Env, ServerConfig, AuthConfig } from './types';
 
 const SECRET_PATTERN = /\$\{([\w-]+)\}/g;
 
@@ -9,7 +9,7 @@ export function interpolateSecret(
   value: string,
   env: Env,
   isAuth: boolean = false
-): string | null {
+): string {
   return value.replace(SECRET_PATTERN, (match, secretName) => {
     const secretValue = env[secretName] as string | undefined;
 
@@ -78,6 +78,14 @@ export function processServerConfig(config: ServerConfig, env: Env): ServerConfi
     } catch {
       throw new Error('Missing required authentication secret');
     }
+  }
+
+  // Process authConfigs
+  if (processedConfig.authConfigs) {
+    processedConfig.authConfigs = processedConfig.authConfigs.map((config): AuthConfig => ({
+      header: config.header,
+      value: interpolateSecret(config.value, env, true)
+    }));
   }
 
   // Process headers

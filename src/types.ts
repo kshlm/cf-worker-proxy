@@ -1,7 +1,6 @@
 export interface AuthConfig {
   header: string
   value: string
-  required?: boolean
 }
 
 export interface ServerConfig {

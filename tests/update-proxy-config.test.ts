@@ -129,8 +129,7 @@ preview_id = "test-preview-id"
           authConfigs: [
             {
               header: 'Authorization',
-              value: 'Bearer token',
-              required: true
+              value: 'Bearer token'
             }
           ]
         }

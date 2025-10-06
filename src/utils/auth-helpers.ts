@@ -16,14 +16,9 @@ export function mergeAuthConfigs(serverConfig: ServerConfig): AuthConfig[] {
     )
 
     if (!headerExists) {
-      // Legacy auth is required only when no authConfigs are present
-      // When authConfigs exist, follow the same pattern (optional by default)
-      const isRequired = !serverConfig.authConfigs || serverConfig.authConfigs.length === 0
-
       authConfigs.push({
         header: legacyHeaderName,
-        value: serverConfig.auth,
-        required: isRequired
+        value: serverConfig.auth
       })
     }
   }

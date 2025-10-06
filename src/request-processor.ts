@@ -44,20 +44,9 @@ function buildBackendUrl(baseUrl: string, originalUrl: string, serverKey: string
  * Checks if the incoming request has valid authentication using "any one match" logic.
  */
 function checkAuth(request: Request, authConfigs: AuthConfig[]): boolean {
+  // Allow access if no headers have been configured
   if (authConfigs.length === 0) {
     return true
-  }
-
-  // Check if any required auth header is missing
-  const hasMissingRequired = authConfigs.some(config => {
-    if (config.required !== true) return false
-
-    const headerValue = request.headers.get(config.header)
-    return !headerValue
-  })
-
-  if (hasMissingRequired) {
-    return false
   }
 
   // Check if any auth header matches (any one match is sufficient)
@@ -72,13 +61,8 @@ function checkAuth(request: Request, authConfigs: AuthConfig[]): boolean {
     return true
   }
 
-  // If no headers match, only allow access if all headers are optional AND no auth headers are present
-  const allOptional = authConfigs.every(config => config.required !== true)
-  const hasAnyAuthHeader = authConfigs.some(config =>
-    request.headers.has(config.header)
-  )
-
-  return allOptional && !hasAnyAuthHeader
+  // Return false is no header matches
+  return false
 }
 
 /**

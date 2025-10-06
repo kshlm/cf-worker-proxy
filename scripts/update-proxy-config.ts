@@ -25,7 +25,6 @@ function convertLegacyToMultiAuth(config: ServerConfig): ServerConfig {
   const authConfig: AuthConfig = {
     header: config.authHeader || 'Authorization',
     value: config.auth,
-    required: true // Legacy auth was required by default
   }
 
   return {
@@ -166,11 +165,10 @@ function formatAuthConfigs(config: ServerConfig): string {
   }
 
   return config.authConfigs.map(auth => {
-    const status = auth.required ? 'required' : 'optional'
     const value = auth.value.includes('${')
       ? auth.value.replace(/\$\{[^}]+\}/g, '[$SECRET]')
       : '[sensitive value]'
-    return `${auth.header}: ${value} (${status})`
+    return `${auth.header}: ${value}`
   }).join(', ')
 }
 
@@ -258,16 +256,12 @@ async function collectAuthConfigs(): Promise<AuthConfig[]> {
       continue
     }
 
-    const requiredInput = (await askQuestion(`Is this header required? (y/n, default: y): `)).toLowerCase().trim()
-    const required = requiredInput !== 'n' // Default to required
-
     authConfigs.push({
       header: headerName,
       value: authValue,
-      required
     })
 
-    console.log(`Added auth config: ${headerName} (${required ? 'required' : 'optional'})`)
+    console.log(`Added auth config: ${headerName}`)
 
     const addMore = (await askQuestion('Add another auth configuration? (y/n): ')).toLowerCase().trim()
     if (addMore !== 'y') {
@@ -290,11 +284,10 @@ async function editAuthConfigs(currentAuthConfigs?: AuthConfig[]): Promise<AuthC
       console.log('No authentication configured.')
     } else {
       authConfigs.forEach((config, index) => {
-        const status = config.required ? 'required' : 'optional'
         const value = config.value.includes('${')
           ? config.value.replace(/\$\{[^}]+\}/g, '[$SECRET]')
           : '[sensitive value]'
-        console.log(`${index + 1}. ${config.header}: ${value} (${status})`)
+        console.log(`${index + 1}. ${config.header}: ${value}`)
       })
     }
 
@@ -317,7 +310,7 @@ async function editAuthConfigs(currentAuthConfigs?: AuthConfig[]): Promise<AuthC
       }
 
       const config = authConfigs[index - 1]
-      console.log(`\nEditing: ${config.header} (${config.required ? 'required' : 'optional'})`)
+      console.log(`\nEditing: ${config.header}`)
 
       const newHeader = (await askQuestion(`Header name (${config.header}): `)).trim()
       if (newHeader && newHeader !== config.header) {
@@ -334,13 +327,6 @@ async function editAuthConfigs(currentAuthConfigs?: AuthConfig[]): Promise<AuthC
       if (newValue) {
         config.value = newValue
       }
-
-      const requiredInput = (await askQuestion(`Required? (y/n, current: ${config.required ? 'y' : 'n'}): `)).toLowerCase().trim()
-      if (requiredInput) {
-        config.required = requiredInput !== 'n'
-      }
-
-      console.log(`Updated: ${config.header} (${config.required ? 'required' : 'optional'})`)
     } else if (action === '3') {
       // Delete auth config
       if (authConfigs.length === 0) {
