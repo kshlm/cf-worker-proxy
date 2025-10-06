@@ -123,7 +123,17 @@ preview_id = "test-preview-id"
       
       expect(result).toEqual({
         server1: { url: 'https://example1.com' },
-        server2: { url: 'https://example2.com', auth: 'Bearer token' }
+        server2: {
+          url: 'https://example2.com',
+          auth: 'Bearer token',
+          authConfigs: [
+            {
+              header: 'Authorization',
+              value: 'Bearer token',
+              required: true
+            }
+          ]
+        }
       })
     })
 
