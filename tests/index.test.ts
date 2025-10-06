@@ -350,18 +350,83 @@ describe('worker', () => {
         auth: undefined,
         headers: { 'X-Auth': '${API_TOKEN}' }
       })
-      
+
       const mockResponse = new Response('Success', { status: 200 })
       mockFetch.mockResolvedValue(mockResponse)
-      
+
       const request = new Request('https://proxy.example.com/api/users')
-      
+
       const response = await worker.fetch(request, mockEnv as Env)
       expect(response.status).toBe(200)
-      
+
       const calledRequest = mockFetch.mock.calls[0][0] as Request
       expect(calledRequest.headers.get('X-Auth')).toBe('${API_TOKEN}')
     })
-})
+  })
 
+  describe('custom Authorization headers', () => {
+    it('should add Authorization header from custom headers when auth is not required', async () => {
+      vi.mocked(mockEnv.PROXY_SERVERS.get).mockResolvedValue({
+        url: 'https://api.example.com',
+        headers: { 'Authorization': 'Bearer custom-token-123' }
+      })
+
+      const mockResponse = new Response('Success', { status: 200 })
+      mockFetch.mockResolvedValue(mockResponse)
+
+      const request = new Request('https://proxy.example.com/api/users')
+
+      const response = await worker.fetch(request, mockEnv)
+      expect(response.status).toBe(200)
+
+      const calledRequest = mockFetch.mock.calls[0][0] as Request
+      expect(calledRequest.headers.get('Authorization')).toBe('Bearer custom-token-123')
+    })
+
+    it('should add Authorization header from custom headers when different auth header is used for auth', async () => {
+      vi.mocked(mockEnv.PROXY_SERVERS.get).mockResolvedValue({
+        url: 'https://api.example.com',
+        auth: 'secret-api-key',
+        authHeader: 'X-API-Key',
+        headers: { 'Authorization': 'Bearer downstream-token' }
+      })
+
+      const mockResponse = new Response('Success', { status: 200 })
+      mockFetch.mockResolvedValue(mockResponse)
+
+      const request = new Request('https://proxy.example.com/api/users', {
+        headers: { 'X-API-Key': 'secret-api-key' }
+      })
+
+      const response = await worker.fetch(request, mockEnv)
+      expect(response.status).toBe(200)
+
+      const calledRequest = mockFetch.mock.calls[0][0] as Request
+      expect(calledRequest.headers.get('Authorization')).toBe('Bearer downstream-token')
+      expect(calledRequest.headers.get('X-API-Key')).toBeNull()
+    })
+
+    it('should add custom Authorization header when incoming Authorization is removed for security', async () => {
+      vi.mocked(mockEnv.PROXY_SERVERS.get).mockResolvedValue({
+        url: 'https://api.example.com',
+        auth: 'Bearer required-auth',
+        headers: { 'Authorization': 'Bearer custom-downstream-token' }
+      })
+
+      const mockResponse = new Response('Success', { status: 200 })
+      mockFetch.mockResolvedValue(mockResponse)
+
+      const request = new Request('https://proxy.example.com/api/users', {
+        headers: { 'Authorization': 'Bearer required-auth' }
+      })
+
+      const response = await worker.fetch(request, mockEnv)
+      expect(response.status).toBe(200)
+
+      const calledRequest = mockFetch.mock.calls[0][0] as Request
+      // The incoming Authorization header should be removed (security) and
+      // the custom Authorization header should be added
+      expect(calledRequest.headers.get('Authorization')).toBe('Bearer custom-downstream-token')
+    })
+  })
 })

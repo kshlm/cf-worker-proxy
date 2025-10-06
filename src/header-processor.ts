@@ -51,24 +51,24 @@ export class HeaderProcessor {
 
   /**
    * Adds custom headers to the modified headers, but only if they don't already exist
-   * in the incoming request headers
+   * in the processed headers (after auth header removal)
    *
    * @param modifiedHeaders - The headers object to modify
    * @param customHeaders - Custom headers from configuration
-   * @param originalHeaders - Original request headers to check for conflicts
    */
   public addCustomHeaders(
     modifiedHeaders: Headers,
-    customHeaders: Record<string, string>,
-    originalHeaders: Headers
+    customHeaders: Record<string, string>
   ): void {
     if (!customHeaders) {
       return;
     }
 
     Object.entries(customHeaders).forEach(([headerName, headerValue]) => {
-      // Only add the header if it doesn't already exist in the original request
-      if (!originalHeaders.has(headerName)) {
+      // Only add the header if it doesn't already exist in the processed headers
+      // This allows custom Authorization headers to be added even if they were
+      // removed from the original request for security
+      if (!modifiedHeaders.has(headerName)) {
         modifiedHeaders.set(headerName, headerValue);
       }
     });
@@ -77,7 +77,7 @@ export class HeaderProcessor {
   /**
    * Processes headers for a proxy request by:
    * 1. Copying all incoming headers except the auth header
-   * 2. Adding custom headers from configuration (only if not present in request)
+   * 2. Adding custom headers from configuration (only if not present in processed headers)
    *
    * @param originalRequest - The original incoming request
    * @param serverConfig - The processed server configuration
@@ -98,8 +98,7 @@ export class HeaderProcessor {
     // Add custom headers from configuration
     this.addCustomHeaders(
       processedHeaders,
-      serverConfig.headers || {},
-      originalRequest.headers
+      serverConfig.headers || {}
     );
 
     return processedHeaders;
