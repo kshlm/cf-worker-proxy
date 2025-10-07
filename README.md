@@ -11,6 +11,8 @@ Worker Proxy is a Cloudflare Workers based proxy server that proxies incoming re
 - Each configured downstream server can also be configured to require authn/authz.
   - Auth headers set in incoming requests are compared to the configured auth for the relevant downstream server.
 
+This project has been wholly coded by AI, with some minor fixes by me. using mainly the excellent GLM 4.6 model by Z.AI with Claude Code.
+
 ## Quick Start
 
 1. Clone and install dependencies:
@@ -26,67 +28,99 @@ bun install
 wrangler kv:namespace create "PROXY_SERVERS"
 
 # Update wrangler.toml with the returned ID
-# Then populate your server configuration
-wrangler kv:key put "servers" --namespace-id=YOUR_KV_ID --path=example-kv-config.json
 ```
 
-3. Test locally:
+3. Set up proxy configuration:
+```bash
+# Run the interactive configuration script
+bun run scripts/update-proxy-config.ts
+```
+
+4. Test locally:
 ```bash
 bun run dev
 ```
 
-4. Deploy to Cloudflare:
+5. Deploy to Cloudflare:
 ```bash
 bun run deploy
 ```
 
+The configuration script will guide you through setting up proxy servers, authentication, and secrets interactively.
+
 ## Configuration
 
-The proxy configuration is stored in KV under the `servers` key. Here's an example configuration:
+The proxy configuration is stored in KV with each server as a separate key. The worker includes an interactive configuration script for easy setup and management.
+
+### Configuration Management Script
+
+Use the included interactive script for managing proxy configurations:
+
+```bash
+# Run the configuration script
+bun run scripts/update-proxy-config.ts
+```
+
+The script provides:
+- **Interactive setup**: Guided configuration for new proxy servers
+- **Multi-auth support**: Configure multiple authentication headers
+- **Secret generation**: Auto-generate secure tokens and save as Cloudflare secrets
+- **Validation**: Built-in configuration validation
+- **Legacy migration**: Automatic conversion from old auth format to new multi-auth format
+
+### Secret Management
+
+The proxy supports secret interpolation using the `${SECRET_NAME}` pattern in authentication and header values.
+
+#### Setting Secrets
+
+Use wrangler to set secrets:
+
+```bash
+# Set a secret value
+wrangler secret put API_TOKEN
+
+# Set multiple secrets
+wrangler secret put DB_PASSWORD
+wrangler secret put SERVICE_KEY
+```
+
+#### Using Secrets in Configuration
 
 ```json
 {
   "api": {
     "url": "https://api.example.com",
-    "headers": {
-      "X-Custom": "value",
-      "Authorization": "Bearer static-token"
-    },
-    "auth": "Bearer required-token"
-  },
-  "web": {
-    "url": "https://web.example.com"
-  },
-  "images": {
-    "url": "https://cdn.example.com",
-    "headers": {
-      "X-CDN": "true"
-    }
-  },
-  "custom-auth": {
-    "url": "https://secure-api.example.com",
-    "auth": "secret-api-key-123",
-    "authHeader": "X-API-Key"
-  },
-  "multi-auth": {
-    "url": "https://flexible-api.example.com",
     "authConfigs": [
       {
         "header": "Authorization",
-        "value": "Bearer bearer-token-123"
-      },
-      {
-        "header": "X-API-Key",
-        "value": "secret-key-456"
-      },
-      {
-        "header": "X-Service-Token",
-        "value": "service-token-789",
-        "required": true
+        "value": "Bearer ${API_TOKEN}"
       }
-    ]
+    ],
+    "headers": {
+      "X-Service-Key": "${SERVICE_KEY}"
+    }
   }
 }
+```
+
+**Security Notes:**
+- Secrets are never logged or exposed in responses
+- Missing secrets in authentication values will cause requests to fail
+- Missing secrets in header values will fall back to the placeholder text
+- Use descriptive secret names for easier management
+
+#### Common Secret Patterns
+
+```bash
+# Bearer token authentication
+Authorization: Bearer ${API_TOKEN}
+
+# API key authentication
+X-API-Key: ${SERVICE_API_KEY}
+
+# Custom authentication
+X-Custom-Auth: ${CUSTOM_AUTH_VALUE}
 ```
 
 ### Configuration Schema
@@ -94,10 +128,64 @@ The proxy configuration is stored in KV under the `servers` key. Here's an examp
 Each server configuration supports:
 
 - `url` (required): Base URL of the downstream server (must be HTTPS)
-- `headers` (optional): Custom headers to add to outgoing requests
+- `headers` (optional): Custom headers to add to outgoing requests (supports secret interpolation)
 - `auth` (optional): Required authentication header value for incoming requests (legacy)
 - `authHeader` (optional): Custom header name for authentication (defaults to `Authorization`) (legacy)
 - `authConfigs` (optional): Array of multiple authentication configurations (new)
+
+### Example Configuration
+
+Here's an example configuration showing various features:
+
+```json
+{
+  "api": {
+    "url": "https://api.example.com",
+    "headers": {
+      "X-Custom": "value",
+      "X-Service-ID": "${SERVICE_ID}"
+    },
+    "authConfigs": [
+      {
+        "header": "Authorization",
+        "value": "Bearer ${API_TOKEN}"
+      }
+    ]
+  },
+  "web": {
+    "url": "https://web.example.com"
+  },
+  "images": {
+    "url": "https://cdn.example.com",
+    "headers": {
+      "X-CDN": "true",
+      "X-CDN-Key": "${CDN_API_KEY}"
+    }
+  },
+  "custom-auth": {
+    "url": "https://secure-api.example.com",
+    "auth": "${SECRET_API_KEY}",
+    "authHeader": "X-API-Key"
+  },
+  "multi-auth": {
+    "url": "https://flexible-api.example.com",
+    "authConfigs": [
+      {
+        "header": "Authorization",
+        "value": "Bearer ${BEARER_TOKEN}"
+      },
+      {
+        "header": "X-API-Key",
+        "value": "${API_KEY}"
+      },
+      {
+        "header": "X-Service-Token",
+        "value": "${SERVICE_TOKEN}"
+      }
+    ]
+  }
+}
+```
 
 #### Multiple Authentication Headers
 
@@ -106,16 +194,14 @@ The new `authConfigs` array supports multiple authentication methods with the fo
 ```typescript
 interface AuthConfig {
   header: string        // Header name (e.g., "Authorization", "X-API-Key")
-  value: string         // Expected header value
-  required?: boolean    // Whether this header is required (defaults to false)
+  value: string         // Expected header value (supports ${SECRET_NAME} placeholders)
 }
 ```
 
 **Authentication Logic:**
 - **Any One Match**: Access is granted if any configured auth header matches
-- **Required Headers**: When `required: true`, that specific header must be present and match
-- **Optional Headers**: When `required: false` (default), the header is optional
-- **No Auth Headers Present**: If all headers are optional and none are present, access is granted
+- **All Headers Optional**: All auth headers are optional by default
+- **No Auth Headers Present**: If no auth headers are configured, access is granted without authentication
 
 ### Request Routing
 
@@ -140,8 +226,8 @@ The proxy forwards headers as follows:
 {
   "api": {
     "url": "https://api.example.com",
-    "headers": { "X-Default": "config-value" },
-    "auth": "Bearer token123"
+    "headers": { "X-Default": "${DEFAULT_VALUE}" },
+    "auth": "Bearer ${API_TOKEN}"
   }
 }
 ```
@@ -156,8 +242,8 @@ The proxy forwards headers as follows:
   "multi-auth": {
     "url": "https://api.example.com",
     "authConfigs": [
-      { "header": "Authorization", "value": "Bearer token123" },
-      { "header": "X-API-Key", "value": "key456" }
+      { "header": "Authorization", "value": "Bearer ${API_TOKEN}" },
+      { "header": "X-API-Key", "value": "${SERVICE_KEY}" }
     ]
   }
 }
@@ -165,6 +251,7 @@ The proxy forwards headers as follows:
 
 - Request with both auth headers → downstream receives neither `Authorization` nor `X-API-Key`
 - Both authentication headers are removed for security before forwarding to the downstream server
+- Secret interpolation happens before header comparison and removal
 
 ### Authentication
 
@@ -203,8 +290,8 @@ If the required header is missing or doesn't match, the proxy returns a 401 Unau
   "flexible-api": {
     "url": "https://api.example.com",
     "authConfigs": [
-      { "header": "Authorization", "value": "Bearer token123" },
-      { "header": "X-API-Key", "value": "key456" }
+      { "header": "Authorization", "value": "Bearer ${TOKEN_123}" },
+      { "header": "X-API-Key", "value": "${KEY_456}" }
     ]
   }
 }
@@ -214,22 +301,39 @@ If the required header is missing or doesn't match, the proxy returns a 401 Unau
 - Request with `Authorization: wrong` → ❌ 401 Unauthorized
 - Request with no auth headers → ✅ Success (all optional)
 
-**Example 2: Required + Optional Headers**
+**Example 2: Service-Specific Authentication**
 ```json
 {
-  "secure-api": {
+  "service-api": {
     "url": "https://api.example.com",
     "authConfigs": [
-      { "header": "X-Service-Token", "value": "service789", "required": true },
-      { "header": "Authorization", "value": "Bearer token123" }
+      { "header": "X-Service-Token", "value": "${SERVICE_TOKEN}" },
+      { "header": "Authorization", "value": "Bearer ${BACKUP_TOKEN}" }
     ]
   }
 }
 ```
 - Request with `X-Service-Token: service789` → ✅ Success
-- Request with `Authorization: Bearer token123` → ❌ 401 Unauthorized (missing required)
-- Request with both headers → ✅ Success
-- Request with no headers → ❌ 401 Unauthorized (missing required)
+- Request with `Authorization: Bearer token123` → ✅ Success
+- Request with both headers → ✅ Success (any one match is sufficient)
+- Request with no headers → ❌ 401 Unauthorized (auth configured but none provided)
+
+**Example 3: Multiple API Key Support**
+```json
+{
+  "multi-key-api": {
+    "url": "https://api.example.com",
+    "authConfigs": [
+      { "header": "X-API-Key-V1", "value": "${LEGACY_API_KEY}" },
+      { "header": "X-API-Key", "value": "${NEW_API_KEY}" },
+      { "header": "Authorization", "value": "Bearer ${FALLBACK_TOKEN}" }
+    ]
+  }
+}
+```
+- Supports multiple authentication methods for backward compatibility
+- Clients can use any of the configured authentication methods
+- Useful during API migrations or when supporting multiple client types
 
 #### Backward Compatibility & Migration
 
@@ -271,7 +375,7 @@ If the required header is missing or doesn't match, the proxy returns a 401 Unau
 // After (new)
 {
   "authConfigs": [
-    { "header": "X-API-Key", "value": "Bearer token123", "required": true }
+    { "header": "X-API-Key", "value": "Bearer ${API_TOKEN}" }
   ]
 }
 ```
