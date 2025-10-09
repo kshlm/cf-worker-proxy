@@ -17,6 +17,7 @@ export interface ServersConfig {
 
 export interface Env {
   PROXY_SERVERS: KVNamespace
+  GLOBAL_AUTH_CONFIGS?: string
   [key: string]: string | KVNamespace | undefined
 }
 

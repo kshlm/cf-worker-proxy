@@ -81,7 +81,7 @@ describe('worker', () => {
     const request = new Request('https://proxy.example.com/api/test')
     const response = await worker.fetch(request, mockEnv)
     expect(response.status).toBe(500)
-    expect(await response.text()).toBe('{"error":"Service unavailable: Unable to load configuration."}')
+    expect(await response.text()).toBe('{"error":"Failed to load global auth from KV: KV error"}')
   })
 
   it('should return 500 for invalid backend URL', async () => {

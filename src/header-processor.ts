@@ -55,20 +55,23 @@ export function addCustomHeaders(
 }
 
 /**
- * Processes headers for a proxy request by:
- * 1. Copying all incoming headers except the auth headers
- * 2. Adding custom headers from configuration (only if not present in processed headers)
+ * Creates a new Headers object by copying all headers from the original request
+ * except both global and per-server authentication headers
  */
 export function processHeadersForProxy(
   originalRequest: Request,
-  serverConfig: ServerConfig
+  serverConfig: ServerConfig,
+  globalAuthConfigs: AuthConfig[] = []
 ): Headers {
-  // Merge auth configurations
-  const authConfigs = mergeAuthConfigs(serverConfig);
+  // Merge per-server auth configurations
+  const perServerAuthConfigs = mergeAuthConfigs(serverConfig);
+
+  // Combine global and per-server auth configs for header removal
+  const allAuthConfigs = [...globalAuthConfigs, ...perServerAuthConfigs];
 
   // Create headers without authentication headers
-  const processedHeaders = authConfigs.length > 0
-    ? createHeadersWithoutAuth(originalRequest.headers, authConfigs)
+  const processedHeaders = allAuthConfigs.length > 0
+    ? createHeadersWithoutAuth(originalRequest.headers, allAuthConfigs)
     : createHeadersWithoutAuth(originalRequest.headers, serverConfig.authHeader || DEFAULT_HEADERS.AUTHORIZATION);
 
   // Add custom headers from configuration

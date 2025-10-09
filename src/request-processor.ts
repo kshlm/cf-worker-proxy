@@ -3,6 +3,7 @@ import { processServerConfig } from './secret-interpolation';
 import { validateProcessedConfig } from './config-validator';
 import { processHeadersForProxy } from './header-processor';
 import { mergeAuthConfigs } from './utils/auth-helpers';
+import { loadGlobalAuthConfiguration, checkGlobalAuth } from './utils/global-auth';
 import {
   createInvalidRouteResponse,
   createServerNotFoundResponse,
@@ -43,7 +44,7 @@ function buildBackendUrl(baseUrl: string, originalUrl: string, serverKey: string
 /**
  * Checks if the incoming request has valid authentication using "any one match" logic.
  */
-function checkAuth(request: Request, authConfigs: AuthConfig[]): boolean {
+export function checkAuth(request: Request, authConfigs: AuthConfig[]): boolean {
   // Allow access if no headers have been configured
   if (authConfigs.length === 0) {
     return true
@@ -64,6 +65,7 @@ function checkAuth(request: Request, authConfigs: AuthConfig[]): boolean {
   // Return false is no header matches
   return false
 }
+
 
 /**
  * Extracts request context from the incoming request
@@ -117,6 +119,48 @@ async function loadServerConfig(
 }
 
 /**
+ * Implements two-tier authentication flow:
+ * 1. Check global authentication first (only if configured)
+ * 2. If global auth succeeds, allow access (override per-server auth)
+ * 3. If global auth fails, fall back to per-server auth
+ * 4. If global auth is configured but neither succeeds, deny access
+ */
+export function checkTwoTierAuth(
+  request: Request,
+  globalAuthConfigs: AuthConfig[],
+  perServerAuthConfigs: AuthConfig[]
+): { authenticated: boolean; usedGlobalAuth: boolean } {
+  const globalAuthConfigured = globalAuthConfigs.length > 0;
+
+  // Check global authentication only if configured
+  if (globalAuthConfigured) {
+    const globalAuthResult = checkGlobalAuth(request, globalAuthConfigs);
+    if (globalAuthResult) {
+      return { authenticated: true, usedGlobalAuth: true };
+    }
+    // Global auth is configured but failed - continue to per-server auth
+  }
+
+  // Check per-server auth
+  // Important: If global auth is configured and failed, we should not allow access
+  // just because per-server auth is empty. Only allow per-server auth if it's actually configured.
+  if (!globalAuthConfigured && perServerAuthConfigs.length === 0) {
+    // No global auth configured and no per-server auth configured - allow access
+    return { authenticated: true, usedGlobalAuth: false };
+  }
+
+  if (perServerAuthConfigs.length > 0) {
+    const perServerAuthResult = checkAuth(request, perServerAuthConfigs);
+    if (perServerAuthResult) {
+      return { authenticated: true, usedGlobalAuth: false };
+    }
+  }
+
+  // Neither global nor per-server auth succeeded and auth is required
+  return { authenticated: false, usedGlobalAuth: false };
+}
+
+/**
  * Processes the complete request pipeline
  */
 export async function processRequest(request: Request, env: Env): Promise<Response> {
@@ -125,6 +169,21 @@ export async function processRequest(request: Request, env: Env): Promise<Respon
     const requestContext = extractRequestContext(request);
     if (!requestContext) {
       return createInvalidRouteResponse();
+    }
+
+    // Load global auth configuration
+    let globalAuthConfigs: AuthConfig[] = [];
+    try {
+      const globalAuthResult = await loadGlobalAuthConfiguration(env);
+      if (globalAuthResult.error) {
+        console.error(`Global auth configuration failed: ${globalAuthResult.error}`);
+        return createConfigInvalidResponse(globalAuthResult.error);
+      }
+      globalAuthConfigs = globalAuthResult.configs;
+    } catch (error) {
+      console.error(`Global auth loading failed: ${error}`);
+      const errorMessage = error instanceof Error ? error.message : 'Global auth configuration error';
+      return createConfigInvalidResponse(`Global auth configuration failed: ${errorMessage}`);
     }
 
     // Load server configuration
@@ -159,10 +218,12 @@ export async function processRequest(request: Request, env: Env): Promise<Respon
       return createConfigInvalidResponse(errorMessage);
     }
 
-    // Check authentication
+    // Check authentication using two-tier flow
     const mergedAuthConfigs = mergeAuthConfigs(processedConfig);
-    if (!checkAuth(request, mergedAuthConfigs)) {
-      const authHeaders = mergedAuthConfigs.map(config => config.header).join(', ');
+    const authResult = checkTwoTierAuth(request, globalAuthConfigs, mergedAuthConfigs);
+
+    if (!authResult.authenticated) {
+      const authHeaders = [...globalAuthConfigs, ...mergedAuthConfigs].map(config => config.header).join(', ');
       console.warn(`Authentication failed for server "${requestContext.serverKey}" using headers: ${authHeaders}`);
       return createUnauthorizedResponse();
     }
@@ -174,10 +235,11 @@ export async function processRequest(request: Request, env: Env): Promise<Respon
       requestContext.serverKey
     );
 
-    // Process headers
+    // Process headers (remove both global and per-server auth headers)
     const processedHeaders = processHeadersForProxy(
       request,
-      processedConfig
+      processedConfig,
+      globalAuthConfigs
     );
 
     // Create backend request

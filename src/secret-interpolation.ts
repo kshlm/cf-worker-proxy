@@ -100,3 +100,13 @@ export function processServerConfig(config: ServerConfig, env: Env): ServerConfi
 
   return processedConfig;
 }
+
+/**
+ * Processes global auth configuration by interpolating secrets in auth configs.
+ */
+export function processGlobalAuthConfigs(configs: AuthConfig[], env: Env): AuthConfig[] {
+  return configs.map((config): AuthConfig => ({
+    header: config.header,
+    value: interpolateSecret(config.value, env, true)
+  }));
+}
