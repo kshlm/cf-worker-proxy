@@ -380,6 +380,77 @@ If the required header is missing or doesn't match, the proxy returns a 401 Unau
 }
 ```
 
+#### Global Authentication
+
+Global authentication provides a master authentication layer that applies across all servers in the proxy. When configured, it creates a two-tier authentication flow that can override per-server authentication rules.
+
+**Configuration Methods:**
+
+1. **Environment Variable** (recommended for production):
+```bash
+wrangler secret put GLOBAL_AUTH_CONFIGS
+# Enter JSON array when prompted:
+# [{"header": "Authorization", "value": "Bearer ${GLOBAL_ADMIN_TOKEN}"}]
+```
+
+2. **KV Storage** (fallback method):
+```bash
+# Using the configuration script
+bun run scripts/update-proxy-config.ts
+# Choose "Set global authentication configuration"
+```
+
+**Global Auth Examples:**
+
+**Example 1: Single Global Admin Token**
+```json
+[
+  {
+    "header": "Authorization",
+    "value": "Bearer ${GLOBAL_ADMIN_TOKEN}"
+  }
+]
+```
+
+**Example 2: Multiple Global Auth Methods**
+```json
+[
+  {
+    "header": "Authorization", 
+    "value": "Bearer ${MASTER_TOKEN}"
+  },
+  {
+    "header": "X-Admin-Key",
+    "value": "${ADMIN_API_KEY}"
+  },
+  {
+    "header": "X-Service-Token",
+    "value": "${SERVICE_TOKEN}"
+  }
+]
+```
+
+**Two-Tier Authentication Flow:**
+
+1. **Global Auth First**: System checks global authentication if configured
+2. **Override Behavior**: Valid global auth grants access immediately (per-server auth skipped)
+3. **Fallback Logic**: If global auth fails, system falls back to per-server authentication
+4. **Mandatory Auth**: When global auth is configured, some form of authentication is always required
+
+**Use Cases:**
+
+- **Administrative Access**: Provide master access across all proxy servers
+- **Service Accounts**: Allow internal services to access any downstream service
+- **Emergency Access**: Bypass per-server configuration during maintenance
+- **Migration Support**: Maintain access while migrating per-server authentication
+
+**Security Considerations:**
+
+- Global auth headers are removed before forwarding to downstream services
+- Same secret interpolation support (`${SECRET_NAME}`) as per-server auth
+- Provides identical security guarantees as per-server authentication
+- Use with caution - global auth bypasses all per-server restrictions
+
 ## Development
 
 ```bash

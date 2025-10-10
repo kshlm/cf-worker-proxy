@@ -100,6 +100,51 @@ Worker Proxy is a Cloudflare Worker that serves as a reverse proxy, routing inco
 - Provides detailed error logging for debugging (without exposing sensitive values)
 - No auth required if neither `auth` nor `authConfigs` are specified in config.
 
+### Global Authentication
+Global authentication provides a master authentication layer that applies across all servers in the proxy. When configured, it creates a two-tier authentication flow that can override per-server authentication rules.
+
+#### Configuration Methods
+Global authentication can be configured via:
+1. **Environment Variable**: `GLOBAL_AUTH_CONFIGS` (JSON array of AuthConfig objects)
+2. **KV Storage**: Key `global-auth-configs` with JSON array value
+3. **Fallback Logic**: Environment variable takes priority, KV storage used as fallback
+
+```json
+[
+  {
+    "header": "Authorization",
+    "value": "Bearer ${GLOBAL_ADMIN_TOKEN}"
+  },
+  {
+    "header": "X-API-Key", 
+    "value": "${MASTER_API_KEY}"
+  }
+]
+```
+
+#### Two-Tier Authentication Flow
+1. **Global Auth Check**: System first checks global authentication if configured
+2. **Override Behavior**: If global auth succeeds, access is granted immediately (per-server auth skipped)
+3. **Fallback Logic**: If global auth fails, system falls back to per-server authentication
+4. **Mandatory Auth**: When global auth is configured, some form of authentication is always required
+
+#### Global Auth Scenarios
+- **Global Auth Success**: Valid global auth headers grant access regardless of per-server config
+- **Global Auth Failure + Per-Server Success**: Falls back to per-server authentication
+- **Both Fail**: Returns 401 Unauthorized
+- **Global Auth Configured + Server No Auth**: Still requires global auth (no open access)
+
+#### Security Features
+- **Header Removal**: Global auth headers are removed before forwarding to downstream services
+- **Secret Interpolation**: Supports `${SECRET_NAME}` pattern in global auth values
+- **Same Security**: Provides identical security guarantees as per-server authentication
+- **Error Handling**: Malformed global auth config returns 500 Internal Server Error
+
+#### Performance Considerations
+- **Early Exit**: Global auth success skips per-server auth processing
+- **Configuration Caching**: Global auth config is cached to avoid repeated parsing
+- **Minimal Overhead**: Adds only one authentication check when global auth is disabled
+
 ### 4. Request Forwarding
 - Constructs backend URL: `config.url + '/' + remainingPath + search` (where `remainingPath` is the original path minus the first segment).
 - Preserves original query parameters (`search`).
@@ -128,16 +173,17 @@ Worker Proxy is a Cloudflare Worker that serves as a reverse proxy, routing inco
 4. If no `serverKey` or empty path, return 404.
 5. Retrieve config: `await env.KV.get('servers', { type: 'json' })`, then `config = servers[serverKey]`.
 6. If no config, return 404 "Server not found".
-7. **Authentication Check**:
+7. **Two-Tier Authentication Check**:
+   - **Global Authentication**: Load global auth config (environment variable `GLOBAL_AUTH_CONFIGS` or KV key `global-auth-configs`)
+   - If global auth configured and request headers match any global auth config, grant access immediately (skip to step 8)
+   - **Per-Server Authentication**: If global auth fails or not configured, proceed with server-specific auth
    - Merge legacy `auth`/`authHeader` with `authConfigs` (if present) to create unified auth array
-   - If no authentication configured, skip to step 8
-   - Check for required headers: if any `required: true` header is missing, return 401
+   - If no authentication configured and no global auth configured, skip to step 8
    - Check for valid matches: if ANY configured header matches request header value, authentication passes
-   - If no matches and all headers are optional with none present, authentication passes
-   - Otherwise, return 401 "Authentication required"
+   - If global auth is configured but both global and per-server auth fail, return 401 "Authentication required"
 8. Build backend URL: `${config.url}/${pathname.slice(serverKey.length + 1)}${search}`.
 9. Clone request, set `url` to backend URL, add `config.headers`.
-10. Remove all authentication headers from the cloned request for security.
+10. Remove all authentication headers (both global and per-server) from the cloned request for security.
 11. `response = await fetch(modifiedRequest)`.
 12. Return `response`.
 
