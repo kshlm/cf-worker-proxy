@@ -9,6 +9,8 @@
     "build": "wrangler build",
     "deploy": "wrangler deploy",
     "update-config": "bun scripts/update-proxy-config.ts",
+    "backup-config": "bun scripts/backup-config.ts",
+    "restore-config": "bun scripts/restore-config.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src/ --ext .ts,.js",
     "lint:fix": "eslint src/ --ext .ts,.js --fix",
