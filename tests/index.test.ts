@@ -37,7 +37,7 @@ describe('worker', () => {
   it('should return 401 for missing auth when required', async () => {
     vi.mocked(mockEnv.PROXY_SERVERS.get).mockResolvedValue({
       url: 'https://api.example.com',
-      auth: 'Bearer required-token'
+      authConfigs: [{ header: 'Authorization', value: 'Bearer required-token' }]
     })
 
     const request = new Request('https://proxy.example.com/api/users')
@@ -142,8 +142,7 @@ describe('worker', () => {
   it('should return 401 when custom auth header is missing', async () => {
     vi.mocked(mockEnv.PROXY_SERVERS.get).mockResolvedValue({
       url: 'https://api.example.com',
-      auth: 'secret-api-key-123',
-      authHeader: 'X-API-Key'
+      authConfigs: [{ header: 'X-API-Key', value: 'secret-api-key-123' }]
     })
 
     const request = new Request('https://proxy.example.com/api/users')
@@ -155,8 +154,7 @@ describe('worker', () => {
   it('should return 401 when custom auth header does not match', async () => {
     vi.mocked(mockEnv.PROXY_SERVERS.get).mockResolvedValue({
       url: 'https://api.example.com',
-      auth: 'secret-api-key-123',
-      authHeader: 'X-API-Key'
+      authConfigs: [{ header: 'X-API-Key', value: 'secret-api-key-123' }]
     })
 
     const request = new Request('https://proxy.example.com/api/users', {
@@ -171,7 +169,7 @@ describe('worker', () => {
     it('should forward all incoming headers except Authorization header', async () => {
       vi.mocked(mockEnv.PROXY_SERVERS.get).mockResolvedValue({
         url: 'https://api.example.com',
-        auth: 'Bearer token123'
+        authConfigs: [{ header: 'Authorization', value: 'Bearer token123' }]
       })
 
       const mockResponse = new Response('Success', { status: 200 })
@@ -199,8 +197,7 @@ describe('worker', () => {
     it('should forward all incoming headers except custom auth header', async () => {
       vi.mocked(mockEnv.PROXY_SERVERS.get).mockResolvedValue({
         url: 'https://api.example.com',
-        auth: 'secret-key',
-        authHeader: 'X-API-Key'
+        authConfigs: [{ header: 'X-API-Key', value: 'secret-key' }]
       })
 
       const mockResponse = new Response('Success', { status: 200 })
@@ -256,7 +253,7 @@ describe('worker', () => {
   describe('secret interpolation', () => {
     const configWithSecrets = {
       url: 'https://api.example.com',
-      auth: 'Bearer ${API_TOKEN}',
+      authConfigs: [{ header: 'Authorization', value: 'Bearer ${API_TOKEN}' }],
       headers: { 'X-Auth': '${API_TOKEN}', 'X-Static': 'static' }
     }
 
@@ -301,7 +298,6 @@ describe('worker', () => {
     it('should fallback to placeholder in headers if secret missing', async () => {
       vi.mocked(mockEnv.PROXY_SERVERS.get).mockResolvedValue({
         url: 'https://api.example.com',
-        auth: undefined,
         headers: { 'X-Auth': '${API_TOKEN}' }
       })
 
@@ -322,8 +318,7 @@ describe('worker', () => {
     it('should add Authorization header from custom headers when different auth header is used for auth', async () => {
       vi.mocked(mockEnv.PROXY_SERVERS.get).mockResolvedValue({
         url: 'https://api.example.com',
-        auth: 'secret-api-key',
-        authHeader: 'X-API-Key',
+        authConfigs: [{ header: 'X-API-Key', value: 'secret-api-key' }],
         headers: { 'Authorization': 'Bearer downstream-token' }
       })
 
@@ -345,7 +340,7 @@ describe('worker', () => {
     it('should add custom Authorization header when incoming Authorization is removed for security', async () => {
       vi.mocked(mockEnv.PROXY_SERVERS.get).mockResolvedValue({
         url: 'https://api.example.com',
-        auth: 'Bearer required-auth',
+        authConfigs: [{ header: 'Authorization', value: 'Bearer required-auth' }],
         headers: { 'Authorization': 'Bearer custom-downstream-token' }
       })
 
@@ -450,63 +445,63 @@ describe('worker', () => {
       expect(calledRequest.headers.get('X-Other')).toBe('should-pass-through')
     })
 
-    it('should merge legacy auth with authConfigs when no header conflict', async () => {
+    it('should support multiple auth headers', async () => {
       vi.mocked(mockEnv.PROXY_SERVERS.get).mockResolvedValue({
         url: 'https://api.example.com',
-        auth: 'Bearer legacy-token',
-        authHeader: 'X-Legacy-Auth',
         authConfigs: [
-          { header: 'Authorization', value: 'Bearer new-token' }
+          { header: 'Authorization', value: 'Bearer token1' },
+          { header: 'X-API-Key', value: 'key2' },
+          { header: 'X-Custom', value: 'custom3' }
         ]
       })
 
       const mockResponse = new Response('Success', { status: 200 })
       mockFetch.mockResolvedValue(mockResponse)
 
-      // Test with new auth header
+      // Test with Authorization header
       const request1 = new Request('https://proxy.example.com/api/users', {
-        headers: { 'Authorization': 'Bearer new-token' }
+        headers: { 'Authorization': 'Bearer token1' }
       })
 
       const response1 = await worker.fetch(request1, mockEnv)
       expect(response1.status).toBe(200)
 
-      // Test with legacy auth header
+      // Test with X-API-Key header
       const request2 = new Request('https://proxy.example.com/api/users', {
-        headers: { 'X-Legacy-Auth': 'Bearer legacy-token' }
+        headers: { 'X-API-Key': 'key2' }
       })
 
       const response2 = await worker.fetch(request2, mockEnv)
       expect(response2.status).toBe(200)
+
+      // Test with X-Custom header
+      const request3 = new Request('https://proxy.example.com/api/users', {
+        headers: { 'X-Custom': 'custom3' }
+      })
+
+      const response3 = await worker.fetch(request3, mockEnv)
+      expect(response3.status).toBe(200)
     })
 
-    it('should not merge legacy auth when header conflict exists', async () => {
+    it('should handle duplicate auth headers by first match', async () => {
       vi.mocked(mockEnv.PROXY_SERVERS.get).mockResolvedValue({
         url: 'https://api.example.com',
-        auth: 'Bearer legacy-token',
         authConfigs: [
-          { header: 'Authorization', value: 'Bearer new-token' }
+          { header: 'Authorization', value: 'Bearer token1' },
+          { header: 'Authorization', value: 'Bearer token2' }
         ]
       })
 
       const mockResponse = new Response('Success', { status: 200 })
       mockFetch.mockResolvedValue(mockResponse)
 
-      // Should only work with new auth config
-      const request1 = new Request('https://proxy.example.com/api/users', {
-        headers: { 'Authorization': 'Bearer new-token' }
+      // Should match first config
+      const request = new Request('https://proxy.example.com/api/users', {
+        headers: { 'Authorization': 'Bearer token1' }
       })
 
-      const response1 = await worker.fetch(request1, mockEnv)
-      expect(response1.status).toBe(200)
-
-      // Legacy token should not work (conflict was skipped)
-      const request2 = new Request('https://proxy.example.com/api/users', {
-        headers: { 'Authorization': 'Bearer legacy-token' }
-      })
-
-      const response2 = await worker.fetch(request2, mockEnv)
-      expect(response2.status).toBe(401)
+      const response = await worker.fetch(request, mockEnv)
+      expect(response.status).toBe(200)
     })
 
     it('should validate authConfigs structure', async () => {

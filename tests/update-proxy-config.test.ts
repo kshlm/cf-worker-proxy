@@ -114,7 +114,10 @@ preview_id = "test-preview-id"
           return JSON.stringify({ url: 'https://example1.com' })
         }
         if (cmd.includes('kv key get "server2"')) {
-          return JSON.stringify({ url: 'https://example2.com', auth: 'Bearer token' })
+          return JSON.stringify({
+            url: 'https://example2.com',
+            authConfigs: [{ header: 'Authorization', value: 'Bearer token' }]
+          })
         }
         return ''
       })
@@ -125,7 +128,6 @@ preview_id = "test-preview-id"
         server1: { url: 'https://example1.com' },
         server2: {
           url: 'https://example2.com',
-          auth: 'Bearer token',
           authConfigs: [
             {
               header: 'Authorization',

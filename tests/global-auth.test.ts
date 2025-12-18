@@ -252,7 +252,7 @@ describe('Global Authentication', () => {
       ])
       const serverConfig = {
         url: 'https://api.example.com',
-        auth: 'Bearer server-token' // This should be ignored when global auth succeeds
+        authConfigs: [{ header: 'Authorization', value: 'Bearer server-token' }] // This should be ignored when global auth succeeds
       }
 
       mockEnv.GLOBAL_AUTH_CONFIGS = globalAuthConfig
@@ -282,7 +282,7 @@ describe('Global Authentication', () => {
       ])
       const serverConfig = {
         url: 'https://api.example.com',
-        auth: 'Bearer server-token'
+        authConfigs: [{ header: 'Authorization', value: 'Bearer server-token' }]
       }
 
       mockEnv.GLOBAL_AUTH_CONFIGS = globalAuthConfig
