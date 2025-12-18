@@ -147,61 +147,13 @@ export function validateAuthConfigs(authConfigs?: AuthConfig[]): ValidationResul
 }
 
 /**
- * Validates authentication configuration (legacy and new)
+ * Validates authentication configuration
  */
-export function validateAuthentication(auth?: string, authHeader?: string, authConfigs?: AuthConfig[]): ValidationResult {
-  // Validate new authConfigs first
+export function validateAuthentication(authConfigs?: AuthConfig[]): ValidationResult {
+  // Validate authConfigs
   const authConfigsValidation = validateAuthConfigs(authConfigs);
   if (!authConfigsValidation.isValid) {
     return authConfigsValidation;
-  }
-
-  // If authConfigs exist, we don't need to validate legacy auth
-  if (authConfigs && authConfigs.length > 0) {
-    return { isValid: true };
-  }
-
-  // Validate legacy auth
-  if (!auth) {
-    return { isValid: true }; // No authentication required
-  }
-
-  // Check if auth value is not empty
-  if (auth.trim() === '') {
-    return {
-      isValid: false,
-      error: {
-        message: 'Configuration invalid: Authentication value cannot be empty.',
-        status: 500,
-        context: 'Auth field is present but empty'
-      }
-    };
-  }
-
-  // Validate custom auth header name if provided
-  if (authHeader) {
-    if (authHeader.trim() === '') {
-      return {
-        isValid: false,
-        error: {
-          message: 'Configuration invalid: Custom auth header name cannot be empty.',
-          status: 500,
-          context: 'authHeader is present but empty'
-        }
-      };
-    }
-
-    // Check for valid header name format (basic validation)
-    if (!/^[a-zA-Z0-9-]+$/.test(authHeader)) {
-      return {
-        isValid: false,
-        error: {
-          message: 'Configuration invalid: Custom auth header name contains invalid characters.',
-          status: 500,
-          context: `authHeader "${authHeader}" contains invalid characters`
-        }
-      };
-    }
   }
 
   return { isValid: true };
@@ -268,8 +220,8 @@ export function validateProcessedConfig(config: ServerConfig): ValidationResult 
     return urlValidation;
   }
 
-  // Validate authentication (both legacy and new)
-  const authValidation = validateAuthentication(config.auth, config.authHeader, config.authConfigs);
+  // Validate authentication
+  const authValidation = validateAuthentication(config.authConfigs);
   if (!authValidation.isValid) {
     return authValidation;
   }

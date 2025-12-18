@@ -31,14 +31,10 @@ Worker Proxy is a Cloudflare Worker that serves as a reverse proxy, routing inco
     url: string; // Base URL of the downstream server (e.g., 'https://api.example.com')
     headers?: Record<string, string>; // Custom headers to add (e.g., { 'Authorization': 'Bearer ${API_TOKEN}' })
 
-    // Legacy single-header authentication (deprecated for new configs)
-    auth?: string; // Required authentication header value for this server (e.g., 'Bearer ${REQUIRED_AUTH}', 'secret-key-123')
-    authHeader?: string; // Custom header name for authentication (defaults to 'Authorization') (e.g., 'X-API-Key')
-
-    // New multi-header authentication
+    // Multi-header authentication
     authConfigs?: AuthConfig[]; // Array of authentication configurations supporting multiple valid headers
 
-    Note: Both `auth`, `authConfig.value`, and header values support interpolation using Worker Secrets.
+    Note: Both `authConfig.value` and header values support interpolation using Worker Secrets.
     Use placeholders like `${SECRET_NAME}` which will be replaced with the value from `env.SECRET_NAME` at runtime.
     This allows storing sensitive tokens as Cloudflare Worker Secrets instead of plain text in KV.
   }
@@ -49,12 +45,15 @@ Worker Proxy is a Cloudflare Worker that serves as a reverse proxy, routing inco
     "api": {
       "url": "https://api.backend.com",
       "headers": { "X-Custom": "value", "Authorization": "Bearer ${API_AUTH_TOKEN}" },
-      "auth": "Bearer ${REQUIRED_AUTH_TOKEN}"
+      "authConfigs": [
+        { "header": "Authorization", "value": "Bearer ${REQUIRED_AUTH_TOKEN}" }
+      ]
     },
     "secure-api": {
       "url": "https://secure-api.backend.com",
-      "auth": "${SECRET_API_KEY}",
-      "authHeader": "X-API-Key"
+      "authConfigs": [
+        { "header": "X-API-Key", "value": "${SECRET_API_KEY}" }
+      ]
     },
     "multi-auth-api": {
       "url": "https://flexible-api.backend.com",
@@ -71,14 +70,6 @@ Worker Proxy is a Cloudflare Worker that serves as a reverse proxy, routing inco
 
 ## 3. Authentication and Authorization
 
-### Legacy Single-Header Authentication
-- For servers with legacy `auth` configured:
-  - Extracts the authentication header from incoming request:
-    - Uses `config.authHeader` if specified (e.g., "X-API-Key")
-    - Defaults to "Authorization" header if `authHeader` not specified
-  - Compares it exactly with the configured `auth` value (case-sensitive, no hashing for simplicity).
-  - If mismatch or absent, returns HTTP 401 Unauthorized with message "Authentication required".
-
 ### Multi-Header Authentication
 - For servers with `authConfigs` configured:
   - Supports multiple valid authentication headers simultaneously
@@ -89,16 +80,10 @@ Worker Proxy is a Cloudflare Worker that serves as a reverse proxy, routing inco
   - **No Auth Headers Present**:
     - If no auth headers are configured, authentication succeeds
 
-### Backward Compatibility
-- Legacy `auth`/`authHeader` configurations continue to work unchanged
-- Mixed configurations (legacy + new) are supported:
-  - Legacy auth is merged into `authConfigs` if no header name conflict exists
-  - `authConfigs` takes precedence when header names conflict
-
 ### Error Responses
 - Returns HTTP 401 Unauthorized with message "Authentication required" when authentication fails
 - Provides detailed error logging for debugging (without exposing sensitive values)
-- No auth required if neither `auth` nor `authConfigs` are specified in config.
+- No auth required if `authConfigs` is not specified or is empty in config.
 
 ### Global Authentication
 Global authentication provides a master authentication layer that applies across all servers in the proxy. When configured, it creates a two-tier authentication flow that can override per-server authentication rules.
@@ -150,10 +135,7 @@ Global authentication can be configured via:
 - Preserves original query parameters (`search`).
 - Method and body are forwarded as-is.
 - All incoming headers are forwarded downstream **except** the authentication headers:
-  - **Legacy**: If `authHeader` is configured, that header is excluded (e.g., "X-API-Key")
-  - **Legacy**: If not configured, the "Authorization" header is excluded
-  - **Multi-Auth**: All headers configured in `authConfigs` are excluded for security
-  - **Mixed**: All configured headers from both legacy and new authentication methods are excluded
+  - All headers configured in `authConfigs` are excluded for security
 - Configured headers are added only if they don't already exist in the incoming request
   - Incoming headers take priority over configured headers
   - Interpolates any secrets in the config `headers`
@@ -177,9 +159,8 @@ Global authentication can be configured via:
    - **Global Authentication**: Load global auth config (environment variable `GLOBAL_AUTH_CONFIGS` or KV key `global-auth-configs`)
    - If global auth configured and request headers match any global auth config, grant access immediately (skip to step 8)
    - **Per-Server Authentication**: If global auth fails or not configured, proceed with server-specific auth
-   - Merge legacy `auth`/`authHeader` with `authConfigs` (if present) to create unified auth array
+   - Check `authConfigs` for valid matches: if ANY configured header matches request header value, authentication passes
    - If no authentication configured and no global auth configured, skip to step 8
-   - Check for valid matches: if ANY configured header matches request header value, authentication passes
    - If global auth is configured but both global and per-server auth fail, return 401 "Authentication required"
 8. Build backend URL: `${config.url}/${pathname.slice(serverKey.length + 1)}${search}`.
 9. Clone request, set `url` to backend URL, add `config.headers`.

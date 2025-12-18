@@ -62,23 +62,10 @@ export function validateSecretsAvailable(secretNames: string[], env: Env): boole
 }
 
 /**
- * Processes a server configuration by interpolating secrets in auth and headers.
+ * Processes a server configuration by interpolating secrets in authConfigs and headers.
  */
 export function processServerConfig(config: ServerConfig, env: Env): ServerConfig {
   const processedConfig = { ...config };
-
-  // Process authentication field
-  if (processedConfig.auth) {
-    try {
-      const interpolatedAuth = interpolateSecret(processedConfig.auth, env, true);
-      if (interpolatedAuth === null) {
-        throw new Error('Auth interpolation failed');
-      }
-      processedConfig.auth = interpolatedAuth;
-    } catch {
-      throw new Error('Missing required authentication secret');
-    }
-  }
 
   // Process authConfigs
   if (processedConfig.authConfigs) {

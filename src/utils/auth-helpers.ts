@@ -1,29 +1,10 @@
 import { AuthConfig, ServerConfig } from '../types';
-import { DEFAULT_HEADERS } from '../constants';
 
 /**
- * Merges legacy auth configuration with new authConfigs array.
- * Legacy auth is only added if no config with the same header name exists in authConfigs.
+ * Returns auth configurations from server config
  */
 export function mergeAuthConfigs(serverConfig: ServerConfig): AuthConfig[] {
-  const authConfigs: AuthConfig[] = serverConfig.authConfigs ? [...serverConfig.authConfigs] : []
-
-  // If legacy auth exists, merge it only if no conflict with existing header
-  if (serverConfig.auth) {
-    const legacyHeaderName = serverConfig.authHeader || DEFAULT_HEADERS.AUTHORIZATION
-    const headerExists = authConfigs.some(config =>
-      config.header.toLowerCase() === legacyHeaderName.toLowerCase()
-    )
-
-    if (!headerExists) {
-      authConfigs.push({
-        header: legacyHeaderName,
-        value: serverConfig.auth
-      })
-    }
-  }
-
-  return authConfigs
+  return serverConfig.authConfigs ? [...serverConfig.authConfigs] : []
 }
 
 /**

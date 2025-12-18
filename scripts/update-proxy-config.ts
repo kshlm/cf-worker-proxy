@@ -8,32 +8,10 @@ let currentConfig: Record<string, ServerConfig> = {}
 import * as fs from 'fs'
 
 /**
- * Converts legacy auth configuration to new authConfigs format
+ * Returns server config as-is (legacy conversion no longer needed)
  */
 function convertLegacyToMultiAuth(config: ServerConfig): ServerConfig {
-  // If already has authConfigs, no conversion needed
-  if (config.authConfigs && config.authConfigs.length > 0) {
-    return config
-  }
-
-  // If no legacy auth, return as-is
-  if (!config.auth) {
-    return config
-  }
-
-  // Convert legacy auth to authConfigs
-  const authConfig: AuthConfig = {
-    header: config.authHeader || 'Authorization',
-    value: config.auth,
-  }
-
-  return {
-    ...config,
-    authConfigs: [authConfig],
-    // Keep legacy fields for backward compatibility during script execution
-    auth: config.auth,
-    authHeader: config.authHeader
-  }
+  return config
 }
 import * as path from 'path'
 import * as os from 'os'
@@ -397,18 +375,10 @@ function validateAuthConfigs(authConfigs?: AuthConfig[]): { isValid: boolean; er
 }
 
 /**
- * Cleans up configuration before saving by removing conflicting auth fields
+ * Returns config as-is (no cleanup needed since legacy auth fields are removed)
  */
 function cleanupConfigForSaving(config: ServerConfig): ServerConfig {
-  const cleanedConfig = { ...config }
-
-  // If authConfigs is present, remove legacy auth fields to avoid conflicts
-  if (cleanedConfig.authConfigs && cleanedConfig.authConfigs.length > 0) {
-    delete cleanedConfig.auth
-    delete cleanedConfig.authHeader
-  }
-
-  return cleanedConfig
+  return { ...config }
 }
 
 // Export functions for testing
@@ -437,82 +407,12 @@ async function addEntry() {
   const needsAuthInput = (await askQuestion('Does it need authentication? (y/n): ')).toLowerCase().trim()
   const needsAuth = needsAuthInput === 'y'
   let authConfigs: AuthConfig[] | undefined
-  let auth: string | undefined
-  let authHeader: string | undefined
 
   if (needsAuth) {
-    const authMode = (await askQuestion('Choose auth mode:\n1. Multiple auth headers (new format)\n2. Single auth header (legacy format)\nEnter choice (1 or 2): ')).trim()
-
-    if (authMode === '1') {
-      // Multi-auth configuration
-      console.log('\n=== Multiple Authentication Headers ===')
-      console.log('Configure multiple authentication headers. Access is granted if ANY header matches.')
-      authConfigs = await collectAuthConfigs()
-    } else {
-      // Legacy single auth configuration
-      const useCustomHeader = (await askQuestion('Use custom auth header? (y/n, default: Authorization): ')).toLowerCase().trim()
-      if (useCustomHeader === 'y') {
-        authHeader = (await askQuestion('Enter custom header name (e.g., X-API-Key): ')).trim()
-        if (!authHeader) {
-          console.log('Header name cannot be empty, using default Authorization header.')
-          authHeader = undefined
-        }
-      }
-
-      const authChoice = (await askQuestion('Choose auth type:\n1. Manual entry (use ${SECRET_NAME} placeholders)\n2. Auto-generate token and save as secret\n3. Auto-generate with custom pattern (use <TOKEN> placeholder)\nEnter choice (1, 2, or 3): ')).trim()
-
-      if (authChoice === '2') {
-        // Auto-generate secure random token and save as secret
-        const token = crypto.randomBytes(32).toString('hex')
-        const secretName = `${id}_AUTH_TOKEN`
-        console.log(`Generated auth token: ${token}`)
-        const confirm = (await askQuestion('Save this token as a secret? (y/n): ')).toLowerCase().trim()
-        if (confirm === 'y') {
-          console.log(`Saving auth token for ${id} as secret ${secretName}...`)
-          if (saveSecret(secretName, token)) {
-            auth = `Bearer \${${secretName}}`
-            console.log(`Auth set to: Bearer [${secretName}] (token saved securely).`)
-          } else {
-            console.log('Failed to save secret; proceeding without auth.')
-          }
-        } else {
-          console.log('Token not saved.')
-        }
-      } else if (authChoice === '3') {
-        // Auto-generate with custom pattern
-        const pattern = (await askQuestion('Enter auth pattern with <TOKEN> placeholder (e.g., "Bearer <TOKEN>", "<TOKEN>", "X-API-Key: <TOKEN>"): ')).trim()
-        if (!pattern || !pattern.includes('<TOKEN>')) {
-          console.log('Pattern must include <TOKEN> placeholder.')
-          return
-        }
-
-        const token = crypto.randomBytes(32).toString('hex')
-        const secretName = `${id}_AUTH_TOKEN`
-        console.log(`Generated auth token: ${token}`)
-        const confirm = (await askQuestion('Save this token as a secret? (y/n): ')).toLowerCase().trim()
-        if (confirm === 'y') {
-          console.log(`Saving auth token for ${id} as secret ${secretName}...`)
-          if (saveSecret(secretName, token)) {
-            // Replace <TOKEN> with secret placeholder
-            auth = pattern.replace('<TOKEN>', `\${${secretName}}`)
-            console.log(`Auth set to: ${auth.replace(/\$\{[^}]+\}/g, '[$SECRET]')} (token saved securely).`)
-          } else {
-            console.log('Failed to save secret; proceeding without auth.')
-          }
-        } else {
-          console.log('Token not saved.')
-        }
-      } else {
-        // Manual entry
-        auth = (await askQuestion("Enter auth header value (e.g., 'Bearer ${API_TOKEN}', empty for none): ")).trim()
-        if (!auth) {
-          console.log('No auth set.')
-          auth = undefined
-        } else {
-          console.log(`Auth set to: ${auth.includes('${') ? auth : '[value - consider using ${SECRET_NAME} placeholder]'}`)
-        }
-      }
-    }
+    // Multi-auth configuration (only supported format)
+    console.log('\n=== Authentication Headers ===')
+    console.log('Configure authentication headers. Access is granted if ANY header matches.')
+    authConfigs = await collectAuthConfigs()
   }
 
   const needsHeadersInput = (await askQuestion('Add downstream headers? (y/n): ')).toLowerCase().trim()
@@ -535,8 +435,6 @@ async function addEntry() {
 
   const newConfig: ServerConfig = { url }
   if (authConfigs) newConfig.authConfigs = authConfigs
-  if (auth) newConfig.auth = auth
-  if (authHeader) newConfig.authHeader = authHeader
   if (Object.keys(headers).length > 0) newConfig.headers = headers
 
   currentConfig[id] = newConfig
@@ -568,89 +466,18 @@ async function modifyEntry() {
 
   const changeAuthInput = (await askQuestion('Change authentication? (y/n): ')).toLowerCase().trim()
   let authConfigs = config.authConfigs
-  let auth = config.auth
-  let authHeader = config.authHeader
 
   if (changeAuthInput === 'y') {
-    const authMode = (await askQuestion('Choose auth mode:\n1. Multiple auth headers (new format)\n2. Single auth header (legacy format)\n3. Remove all authentication\nEnter choice (1, 2, or 3): ')).trim()
+    const authMode = (await askQuestion('Choose auth mode:\n1. Multiple auth headers\n2. Remove all authentication\nEnter choice (1 or 2): ')).trim()
 
     if (authMode === '1') {
       // Multi-auth configuration
-      console.log('\n=== Multiple Authentication Headers ===')
-      console.log('Configure multiple authentication headers. Access is granted if ANY header matches.')
+      console.log('\n=== Authentication Headers ===')
+      console.log('Configure authentication headers. Access is granted if ANY header matches.')
       authConfigs = await editAuthConfigs(authConfigs)
-      // Clear legacy auth when using multi-auth
-      auth = undefined
-      authHeader = undefined
     } else if (authMode === '2') {
-      // Legacy single auth configuration
-      const currentAuth = auth ? (auth.includes('${') ? auth : '[sensitive value - migrate to ${SECRET_NAME}]') : 'none'
-      const currentAuthHeader = authHeader || 'Authorization'
-
-      const changeHeaderInput = (await askQuestion(`Change auth header? (current: ${currentAuthHeader}) (y/n): `)).toLowerCase().trim()
-      if (changeHeaderInput === 'y') {
-        const newHeader = (await askQuestion('Enter new header name (empty for default Authorization): ')).trim()
-        authHeader = newHeader || undefined
-      }
-
-      const authChoice = (await askQuestion('Choose auth option:\n1. Manual entry\n2. Remove auth\n3. Auto-generate new token\n4. Auto-generate with custom pattern (use <TOKEN> placeholder)\nEnter choice (1, 2, 3, or 4): ')).trim()
-
-      if (authChoice === '2') {
-        auth = undefined
-        console.log('Auth removed.')
-      } else if (authChoice === '3') {
-        const token = crypto.randomBytes(32).toString('hex')
-        const secretName = `${id}_AUTH_TOKEN`
-        console.log(`Generated new auth token: ${token}`)
-        const confirm = (await askQuestion('Save this new token as a secret? (y/n): ')).toLowerCase().trim()
-        if (confirm === 'y') {
-          console.log(`Saving new auth token for ${id} as secret ${secretName}...`)
-          if (saveSecret(secretName, token)) {
-            auth = `Bearer \${${secretName}}`
-            console.log(`Auth set to: Bearer [${secretName}] (new token saved securely).`)
-          } else {
-            console.log('Failed to save secret.')
-          }
-        } else {
-          console.log('New token not saved.')
-        }
-      } else if (authChoice === '4') {
-        // Auto-generate with custom pattern
-        const pattern = (await askQuestion('Enter auth pattern with <TOKEN> placeholder (e.g., "Bearer <TOKEN>", "<TOKEN>", "X-API-Key: <TOKEN>"): ')).trim()
-        if (!pattern || !pattern.includes('<TOKEN>')) {
-          console.log('Pattern must include <TOKEN> placeholder.')
-          return
-        }
-
-        const token = crypto.randomBytes(32).toString('hex')
-        const secretName = `${id}_AUTH_TOKEN`
-        console.log(`Generated auth token: ${token}`)
-        const confirm = (await askQuestion('Save this token as a secret? (y/n): ')).toLowerCase().trim()
-        if (confirm === 'y') {
-          console.log(`Saving auth token for ${id} as secret ${secretName}...`)
-          if (saveSecret(secretName, token)) {
-            // Replace <TOKEN> with secret placeholder
-            auth = pattern.replace('<TOKEN>', `\${${secretName}}`)
-            console.log(`Auth set to: ${auth.replace(/\$\{[^}]+\}/g, '[$SECRET]')} (token saved securely).`)
-          } else {
-            console.log('Failed to save secret; proceeding without auth.')
-          }
-        } else {
-          console.log('Token not saved.')
-        }
-      } else {
-        auth = (await askQuestion("Enter new auth header value (e.g., 'Bearer ${API_TOKEN}', empty to remove): ")).trim() || undefined
-        if (auth) {
-          console.log(`Auth set to: ${auth.includes('${') ? auth : '[value - consider using ${SECRET_NAME} placeholder]'}`)
-        }
-      }
-      // Clear authConfigs when using legacy auth
-      authConfigs = undefined
-    } else if (authMode === '3') {
       // Remove all authentication
       authConfigs = undefined
-      auth = undefined
-      authHeader = undefined
       console.log('All authentication removed.')
     }
   }
@@ -679,8 +506,6 @@ async function modifyEntry() {
 
   const updatedConfig: ServerConfig = { url: newUrl }
   if (authConfigs) updatedConfig.authConfigs = authConfigs
-  if (auth) updatedConfig.auth = auth
-  if (authHeader) updatedConfig.authHeader = authHeader
   if (Object.keys(newHeaders).length > 0) updatedConfig.headers = newHeaders
 
   currentConfig[id] = updatedConfig
