@@ -1,34 +1,11 @@
 # Authentication Specification
 
 ## Purpose
-Provide flexible and secure authentication mechanisms for downstream services, supporting both legacy single-header authentication and modern multi-header authentication configurations with secure secret interpolation.
+Provide flexible and secure authentication mechanisms for downstream services, supporting multi-header authentication configurations with secure secret interpolation.
 
 ## Overview
-The authentication capability provides flexible header-based authentication for downstream services. It supports both legacy single-header authentication and modern multi-header authentication configurations, with secure secret interpolation and backward compatibility.
+The authentication capability provides flexible header-based authentication for downstream services using `authConfigs` arrays with any-one-match semantics, secure secret interpolation, and a two-tier global-auth flow. Legacy `auth`/`authHeader` fields are rejected.
 ## Requirements
-### Requirement: Legacy Single-Header Authentication
-The system SHALL support legacy authentication using a single configured header and expected value.
-
-#### Scenario: Default Authorization header
-- **WHEN** server config has `auth: "Bearer token123"` without `authHeader`
-- **THEN** the system SHALL check the `Authorization` header
-- **AND** require exact match with "Bearer token123"
-
-#### Scenario: Custom auth header
-- **WHEN** server config has `auth: "secret-key"` and `authHeader: "X-API-Key"`
-- **THEN** the system SHALL check the `X-API-Key` header
-- **AND** require exact match with "secret-key"
-
-#### Scenario: Missing legacy auth header
-- **WHEN** required auth header is not present in the request
-- **THEN** the system SHALL return 401 Unauthorized
-- **AND** response message SHALL be "Authentication required"
-
-#### Scenario: Incorrect legacy auth value
-- **WHEN** auth header value does not match configured value
-- **THEN** the system SHALL return 401 Unauthorized
-- **AND** response message SHALL be "Authentication required"
-
 ### Requirement: Multi-Header Authentication
 The system SHALL support multiple authentication configurations where any one valid header grants access.
 
@@ -54,33 +31,12 @@ The system SHALL support multiple authentication configurations where any one va
 - **AND** request provides none of the configured headers
 - **THEN** the system SHALL return 401 Unauthorized
 
-### Requirement: Authentication Logic Merging
-The system SHALL merge legacy and modern authentication configurations into a unified authentication check.
-
-#### Scenario: Legacy and modern configs coexist
-- **WHEN** server config has both `auth`/`authHeader` and `authConfigs`
-- **AND** header names do not conflict
-- **THEN** the system SHALL merge all auth configurations
-- **AND** check against any of them
-
-#### Scenario: Header name conflict
-- **WHEN** legacy `authHeader` conflicts with `authConfigs` header name
-- **THEN** `authConfigs` SHALL take precedence
-- **AND** legacy config SHALL be ignored for that header
-
-#### Scenario: Only legacy config present
-- **WHEN** server config has only `auth`/`authHeader`
-- **THEN** the system SHALL use only legacy authentication logic
-
-#### Scenario: Only modern config present
-- **WHEN** server config has only `authConfigs`
-- **THEN** the system SHALL use only modern authentication logic
-
 ### Requirement: No Authentication Required
 The system SHALL allow requests without authentication when no authentication is configured.
 
 #### Scenario: No auth configuration
-- **WHEN** server config has no `auth`, `authHeader`, or `authConfigs`
+- **WHEN** global authentication is not configured
+- **AND** server config has no `authConfigs`
 - **THEN** the system SHALL skip authentication checks
 - **AND** allow the request to proceed
 
@@ -92,8 +48,8 @@ The system SHALL allow requests without authentication when no authentication is
 ### Requirement: Secret Interpolation in Authentication
 The system SHALL support secret interpolation in authentication header values using `${SECRET_NAME}` pattern.
 
-#### Scenario: Secret in legacy auth value
-- **WHEN** server config has `auth: "Bearer ${API_TOKEN}"`
+#### Scenario: Secret in auth value
+- **WHEN** an auth config has `value: "Bearer ${API_TOKEN}"`
 - **AND** environment has `API_TOKEN` secret set to "secret123"
 - **THEN** the system SHALL interpolate to "Bearer secret123"
 - **AND** compare against interpolated value
@@ -119,8 +75,8 @@ The system SHALL support secret interpolation in authentication header values us
 ### Requirement: Authentication Header Security
 The system SHALL remove authentication headers from requests before forwarding to downstream services.
 
-#### Scenario: Legacy auth header removal
-- **WHEN** server config uses legacy `authHeader: "X-API-Key"`
+#### Scenario: Auth header removal
+- **WHEN** server config uses `authConfigs` including `"X-API-Key"`
 - **THEN** the system SHALL remove `X-API-Key` header from forwarded request
 - **AND** not expose it to downstream service
 
@@ -129,8 +85,8 @@ The system SHALL remove authentication headers from requests before forwarding t
 - **THEN** the system SHALL remove both headers from forwarded request
 - **AND** not expose them to downstream service
 
-#### Scenario: Mixed auth headers removal
-- **WHEN** server config has both legacy and modern auth configs
+#### Scenario: Global and per-server auth headers removal
+- **WHEN** global and per-server auth configs both apply to a request
 - **THEN** the system SHALL remove all configured auth headers
 - **AND** not expose any of them to downstream service
 

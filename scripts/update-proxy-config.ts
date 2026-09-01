@@ -1,18 +1,18 @@
 import { createInterface } from 'readline'
 import * as crypto from 'crypto'
 import * as fs from 'fs'
-import * as path from 'path'
-import * as os from 'os'
 import { ServerConfig, AuthConfig } from '../src/types'
 import { validateProcessedConfig } from '../src/config-validator'
-import { runWrangler as runWranglerArgs, writeTempFile, isValidRouteId, parseKeyList, isValidHeaderName, GLOBAL_AUTH_KV_KEY } from './wrangler'
+import {
+  runWrangler as runWranglerArgs,
+  writeTempFile,
+  isValidRouteId,
+  parseKeyList,
+  isValidHeaderName,
+  GLOBAL_AUTH_KV_KEY,
+} from './wrangler'
 
 let currentConfig: Record<string, ServerConfig> = {}
-
-import * as fs from 'fs'
-
-import * as path from 'path'
-import * as os from 'os'
 
 function loadAllConfigs(): Record<string, ServerConfig> {
   const config: Record<string, ServerConfig> = {}
@@ -77,11 +77,11 @@ function saveSecret(secretName: string, value: string): boolean {
 
 const rl = createInterface({
   input: process.stdin,
-  output: process.stdout
+  output: process.stdout,
 })
 
 async function askQuestion(question: string): Promise<string> {
-  return new Promise(resolve => rl.question(question, resolve))
+  return new Promise((resolve) => rl.question(question, resolve))
 }
 
 /**
@@ -92,12 +92,14 @@ function formatAuthConfigs(config: ServerConfig): string {
     return 'No authentication'
   }
 
-  return config.authConfigs.map(auth => {
-    const value = auth.value.includes('${')
-      ? auth.value.replace(/\$\{[^}]+\}/g, '[$SECRET]')
-      : '[sensitive value]'
-    return `${auth.header}: ${value}`
-  }).join(', ')
+  return config.authConfigs
+    .map((auth) => {
+      const value = auth.value.includes('${')
+        ? auth.value.replace(/\$\{[^}]+\}/g, '[$SECRET]')
+        : '[sensitive value]'
+      return `${auth.header}: ${value}`
+    })
+    .join(', ')
 }
 
 /**
@@ -109,7 +111,9 @@ async function collectAuthConfigs(): Promise<AuthConfig[]> {
   while (true) {
     console.log(`\n--- Auth Configuration ${authConfigs.length + 1} ---`)
 
-    const headerName = (await askQuestion('Enter header name (e.g., Authorization, X-API-Key): ')).trim()
+    const headerName = (
+      await askQuestion('Enter header name (e.g., Authorization, X-API-Key): ')
+    ).trim()
     if (!headerName) {
       if (authConfigs.length === 0) {
         console.log('At least one auth configuration is required for authentication.')
@@ -125,18 +129,24 @@ async function collectAuthConfigs(): Promise<AuthConfig[]> {
     }
 
     // Check for duplicate header names
-    if (authConfigs.some(config => config.header.toLowerCase() === headerName.toLowerCase())) {
+    if (authConfigs.some((config) => config.header.toLowerCase() === headerName.toLowerCase())) {
       console.log(`Header "${headerName}" already configured. Please use a different header name.`)
       continue
     }
 
-    const authChoice = (await askQuestion('Choose auth type:\n1. Manual entry (use ${SECRET_NAME} placeholders)\n2. Auto-generate token and save as secret\n3. Auto-generate with custom pattern (use <TOKEN> placeholder)\nEnter choice (1, 2, or 3): ')).trim()
+    const authChoice = (
+      await askQuestion(
+        'Choose auth type:\n1. Manual entry (use ${SECRET_NAME} placeholders)\n2. Auto-generate token and save as secret\n3. Auto-generate with custom pattern (use <TOKEN> placeholder)\nEnter choice (1, 2, or 3): ',
+      )
+    ).trim()
 
     let authValue: string
     if (authChoice === '2') {
       const token = crypto.randomBytes(32).toString('hex')
       const secretName = `${headerName.toUpperCase().replace(/[^A-Z0-9]/g, '_')}_TOKEN`
-      const confirm = (await askQuestion('Save this token as a secret? (y/n): ')).toLowerCase().trim()
+      const confirm = (await askQuestion('Save this token as a secret? (y/n): '))
+        .toLowerCase()
+        .trim()
       if (confirm === 'y') {
         console.log(`Saving auth token as secret ${secretName}...`)
         if (saveSecret(secretName, token)) {
@@ -151,19 +161,27 @@ async function collectAuthConfigs(): Promise<AuthConfig[]> {
         authValue = (await askQuestion(`Enter auth header value for "${headerName}": `)).trim()
       }
     } else if (authChoice === '3') {
-      const pattern = (await askQuestion('Enter auth pattern with <TOKEN> placeholder (e.g., "Bearer <TOKEN>", "<TOKEN>", "X-API-Key: <TOKEN>"): ')).trim()
+      const pattern = (
+        await askQuestion(
+          'Enter auth pattern with <TOKEN> placeholder (e.g., "Bearer <TOKEN>", "<TOKEN>", "X-API-Key: <TOKEN>"): ',
+        )
+      ).trim()
       if (!pattern || !pattern.includes('<TOKEN>')) {
         console.log('Pattern must include <TOKEN> placeholder. Using manual entry.')
         authValue = (await askQuestion(`Enter auth header value for "${headerName}": `)).trim()
       } else {
         const token = crypto.randomBytes(32).toString('hex')
         const secretName = `${headerName.toUpperCase().replace(/[^A-Z0-9]/g, '_')}_TOKEN`
-        const confirm = (await askQuestion('Save this token as a secret? (y/n): ')).toLowerCase().trim()
+        const confirm = (await askQuestion('Save this token as a secret? (y/n): '))
+          .toLowerCase()
+          .trim()
         if (confirm === 'y') {
           console.log(`Saving auth token as secret ${secretName}...`)
           if (saveSecret(secretName, token)) {
             authValue = pattern.replace('<TOKEN>', `\${${secretName}}`)
-            console.log(`Auth value set to: ${authValue.replace(/\$\{[^}]+\}/g, '[$SECRET]')} (token saved securely).`)
+            console.log(
+              `Auth value set to: ${authValue.replace(/\$\{[^}]+\}/g, '[$SECRET]')} (token saved securely).`,
+            )
           } else {
             console.log('Failed to save secret; using manual entry.')
             authValue = (await askQuestion(`Enter auth header value for "${headerName}": `)).trim()
@@ -189,7 +207,9 @@ async function collectAuthConfigs(): Promise<AuthConfig[]> {
 
     console.log(`Added auth config: ${headerName}`)
 
-    const addMore = (await askQuestion('Add another auth configuration? (y/n): ')).toLowerCase().trim()
+    const addMore = (await askQuestion('Add another auth configuration? (y/n): '))
+      .toLowerCase()
+      .trim()
     if (addMore !== 'y') {
       break
     }
@@ -217,7 +237,11 @@ async function editAuthConfigs(currentAuthConfigs?: AuthConfig[]): Promise<AuthC
       })
     }
 
-    const action = (await askQuestion('\nChoose action:\n1. Add auth header\n2. Edit auth header\n3. Delete auth header\n4. Done\nEnter choice (1-4): ')).trim()
+    const action = (
+      await askQuestion(
+        '\nChoose action:\n1. Add auth header\n2. Edit auth header\n3. Delete auth header\n4. Done\nEnter choice (1-4): ',
+      )
+    ).trim()
 
     if (action === '1') {
       // Add new auth config
@@ -229,7 +253,9 @@ async function editAuthConfigs(currentAuthConfigs?: AuthConfig[]): Promise<AuthC
         console.log('No auth configurations to edit.')
         continue
       }
-      const index = parseInt(await askQuestion(`Enter auth config number to edit (1-${authConfigs.length}): `))
+      const index = parseInt(
+        await askQuestion(`Enter auth config number to edit (1-${authConfigs.length}): `),
+      )
       if (isNaN(index) || index < 1 || index > authConfigs.length) {
         console.log('Invalid selection.')
         continue
@@ -242,14 +268,22 @@ async function editAuthConfigs(currentAuthConfigs?: AuthConfig[]): Promise<AuthC
       if (newHeader && newHeader !== config.header) {
         if (!isValidHeaderName(newHeader)) {
           console.log('Invalid header name format. Keeping original.')
-        } else if (authConfigs.some((c, i) => i !== index - 1 && c.header.toLowerCase() === newHeader.toLowerCase())) {
+        } else if (
+          authConfigs.some(
+            (c, i) => i !== index - 1 && c.header.toLowerCase() === newHeader.toLowerCase(),
+          )
+        ) {
           console.log(`Header "${newHeader}" already exists. Keeping original.`)
         } else {
           config.header = newHeader
         }
       }
 
-      const newValue = (await askQuestion(`Auth value (current: ${config.value.includes('${') ? config.value.replace(/\$\{[^}]+\}/g, '[$SECRET]') : '[sensitive value]'}): `)).trim()
+      const newValue = (
+        await askQuestion(
+          `Auth value (current: ${config.value.includes('${') ? config.value.replace(/\$\{[^}]+\}/g, '[$SECRET]') : '[sensitive value]'}): `,
+        )
+      ).trim()
       if (newValue) {
         config.value = newValue
       }
@@ -259,13 +293,17 @@ async function editAuthConfigs(currentAuthConfigs?: AuthConfig[]): Promise<AuthC
         console.log('No auth configurations to delete.')
         continue
       }
-      const index = parseInt(await askQuestion(`Enter auth config number to delete (1-${authConfigs.length}): `))
+      const index = parseInt(
+        await askQuestion(`Enter auth config number to delete (1-${authConfigs.length}): `),
+      )
       if (isNaN(index) || index < 1 || index > authConfigs.length) {
         console.log('Invalid selection.')
         continue
       }
 
-      const confirm = (await askQuestion(`Delete "${authConfigs[index - 1].header}"? (y/n): `)).toLowerCase().trim()
+      const confirm = (await askQuestion(`Delete "${authConfigs[index - 1].header}"? (y/n): `))
+        .toLowerCase()
+        .trim()
       if (confirm === 'y') {
         authConfigs.splice(index - 1, 1)
         console.log('Deleted auth configuration.')
@@ -281,7 +319,14 @@ async function editAuthConfigs(currentAuthConfigs?: AuthConfig[]): Promise<AuthC
 }
 
 // Export functions for testing
-export { loadAllConfigs, saveSingleConfig, deleteSingleConfig, saveSecret, askQuestion, formatAuthConfigs }
+export {
+  loadAllConfigs,
+  saveSingleConfig,
+  deleteSingleConfig,
+  saveSecret,
+  askQuestion,
+  formatAuthConfigs,
+}
 
 async function bootstrap() {
   currentConfig = loadAllConfigs()
@@ -306,7 +351,9 @@ async function addEntry() {
     return
   }
 
-  const needsAuthInput = (await askQuestion('Does it need authentication? (y/n): ')).toLowerCase().trim()
+  const needsAuthInput = (await askQuestion('Does it need authentication? (y/n): '))
+    .toLowerCase()
+    .trim()
   const needsAuth = needsAuthInput === 'y'
   let authConfigs: AuthConfig[] | undefined
 
@@ -317,13 +364,19 @@ async function addEntry() {
     authConfigs = await collectAuthConfigs()
   }
 
-  const needsHeadersInput = (await askQuestion('Add downstream headers? (y/n): ')).toLowerCase().trim()
+  const needsHeadersInput = (await askQuestion('Add downstream headers? (y/n): '))
+    .toLowerCase()
+    .trim()
   const needsHeaders = needsHeadersInput === 'y'
   let headers: Record<string, string> = {}
 
   if (needsHeaders) {
-    console.log('Remember: For sensitive values, use placeholders like "${SECRET_NAME}". Set secrets with "wrangler secret put SECRET_NAME"')
-    const headersStr = await askQuestion('Enter headers as JSON object (e.g., {"X-Key": "value", "Authorization": "Bearer ${TOKEN}"}): ')
+    console.log(
+      'Remember: For sensitive values, use placeholders like "${SECRET_NAME}". Set secrets with "wrangler secret put SECRET_NAME"',
+    )
+    const headersStr = await askQuestion(
+      'Enter headers as JSON object (e.g., {"X-Key": "value", "Authorization": "Bearer ${TOKEN}"}): ',
+    )
     try {
       headers = JSON.parse(headersStr)
       if (typeof headers !== 'object' || Array.isArray(headers) || headers === null) {
@@ -375,7 +428,11 @@ async function modifyEntry() {
   let authConfigs = config.authConfigs
 
   if (changeAuthInput === 'y') {
-    const authMode = (await askQuestion('Choose auth mode:\n1. Multiple auth headers\n2. Remove all authentication\nEnter choice (1 or 2): ')).trim()
+    const authMode = (
+      await askQuestion(
+        'Choose auth mode:\n1. Multiple auth headers\n2. Remove all authentication\nEnter choice (1 or 2): ',
+      )
+    ).trim()
 
     if (authMode === '1') {
       // Multi-auth configuration
@@ -394,8 +451,12 @@ async function modifyEntry() {
 
   if (changeHeadersInput === 'y') {
     const currentHeadersStr = JSON.stringify(config.headers || {}, null, 2)
-    console.log('Remember: For sensitive values, use placeholders like "${SECRET_NAME}". Set secrets with "wrangler secret put SECRET_NAME"')
-    const headersStr = await askQuestion(`Enter new headers as JSON (current: ${currentHeadersStr}, empty to remove all): `)
+    console.log(
+      'Remember: For sensitive values, use placeholders like "${SECRET_NAME}". Set secrets with "wrangler secret put SECRET_NAME"',
+    )
+    const headersStr = await askQuestion(
+      `Enter new headers as JSON (current: ${currentHeadersStr}, empty to remove all): `,
+    )
     if (headersStr.trim()) {
       try {
         newHeaders = JSON.parse(headersStr)
@@ -470,7 +531,9 @@ async function main() {
   }
   console.log('\n')
 
-  let action = (await askQuestion('What do you want to do? (a)dd, (m)odify, (d)elete, (q)uit: ')).toLowerCase().trim()
+  let action = (await askQuestion('What do you want to do? (a)dd, (m)odify, (d)elete, (q)uit: '))
+    .toLowerCase()
+    .trim()
 
   while (action !== 'q') {
     if (action === 'a') {
@@ -492,7 +555,9 @@ async function main() {
         console.log(`  URL: ${config.url}`)
         console.log(`  Auth: ${formatAuthConfigs(config)}`)
         if (config.headers && Object.keys(config.headers).length > 0) {
-          console.log(`  Headers: ${JSON.stringify(config.headers, null, 2).replace(/\n/g, '\n  ')}`)
+          console.log(
+            `  Headers: ${JSON.stringify(config.headers, null, 2).replace(/\n/g, '\n  ')}`,
+          )
         }
       }
     }
@@ -503,7 +568,7 @@ async function main() {
   rl.close()
 }
 
-if (process.argv[1] && process.argv[1].endsWith('update-proxy-config.ts')) {
+if (process.argv[1] && process.argv[1].endsWith('update-proxy-config.ts') && !process.env.VITEST) {
   bootstrap().catch((error: unknown) => {
     console.error('update-proxy-config failed:', error instanceof Error ? error.message : error)
     process.exit(1)

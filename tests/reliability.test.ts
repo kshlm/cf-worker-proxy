@@ -11,8 +11,8 @@ global.fetch = mockFetch
 function makeEnv(kv: Record<string, unknown> = {}): Env {
   return {
     PROXY_SERVERS: {
-      get: vi.fn(async (key: string) => (key in kv ? kv[key] : null))
-    }
+      get: vi.fn(async (key: string) => (key in kv ? kv[key] : null)),
+    },
   } as unknown as Env
 }
 
@@ -27,8 +27,10 @@ describe('reliability hardening', () => {
   describe('fail-closed global auth', () => {
     it('treats empty-array GLOBAL_AUTH_CONFIGS as configured: server with no per-server auth gets 401', async () => {
       mockEnv.GLOBAL_AUTH_CONFIGS = '[]'
-      vi.mocked(mockEnv.PROXY_SERVERS.get).mockImplementation(async (key: string) =>
-        key === 'api' ? { url: 'https://api.example.com' } : null
+      vi.mocked(
+        mockEnv.PROXY_SERVERS.get as unknown as ReturnType<typeof vi.fn>,
+      ).mockImplementation(async (key: string) =>
+        key === 'api' ? { url: 'https://api.example.com' } : null,
       )
 
       const response = await worker.fetch(new Request('https://proxy.example.com/api/x'), mockEnv)
@@ -37,10 +39,12 @@ describe('reliability hardening', () => {
 
     it('returns 500 for malformed GLOBAL_AUTH_CONFIGS and never falls back to per-server auth', async () => {
       mockEnv.GLOBAL_AUTH_CONFIGS = 'not-json'
-      vi.mocked(mockEnv.PROXY_SERVERS.get).mockImplementation(async (key: string) =>
+      vi.mocked(
+        mockEnv.PROXY_SERVERS.get as unknown as ReturnType<typeof vi.fn>,
+      ).mockImplementation(async (key: string) =>
         key === 'api'
           ? { url: 'https://api.example.com', authConfigs: [] } // would allow open access if degraded
-          : null
+          : null,
       )
 
       const response = await worker.fetch(new Request('https://proxy.example.com/api/x'), mockEnv)
@@ -49,8 +53,10 @@ describe('reliability hardening', () => {
 
     it('returns 500 for invalid global auth structure', async () => {
       mockEnv.GLOBAL_AUTH_CONFIGS = JSON.stringify([{ header: '', value: '' }])
-      vi.mocked(mockEnv.PROXY_SERVERS.get).mockImplementation(async (key: string) =>
-        key === 'api' ? { url: 'https://api.example.com' } : null
+      vi.mocked(
+        mockEnv.PROXY_SERVERS.get as unknown as ReturnType<typeof vi.fn>,
+      ).mockImplementation(async (key: string) =>
+        key === 'api' ? { url: 'https://api.example.com' } : null,
       )
 
       const response = await worker.fetch(new Request('https://proxy.example.com/api/x'), mockEnv)
@@ -58,9 +64,9 @@ describe('reliability hardening', () => {
     })
 
     it('reports error when env is set but KV also fails to load is irrelevant; absent env falls back to KV', async () => {
-      vi.mocked(mockEnv.PROXY_SERVERS.get).mockResolvedValue(JSON.stringify([
-        { header: 'Authorization', value: 'Bearer kv-token' }
-      ]))
+      vi.mocked(mockEnv.PROXY_SERVERS.get as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
+        JSON.stringify([{ header: 'Authorization', value: 'Bearer kv-token' }]),
+      )
       const result = await loadGlobalAuthConfigurationHelper(mockEnv)
       expect(result.state).toBe('configured')
       expect(result.configs).toEqual([{ header: 'Authorization', value: 'Bearer kv-token' }])
@@ -79,7 +85,9 @@ describe('reliability hardening', () => {
     })
 
     it('loadGlobalAuthFromKV reports absent when KV key missing', async () => {
-      vi.mocked(mockEnv.PROXY_SERVERS.get).mockResolvedValue(null)
+      vi.mocked(mockEnv.PROXY_SERVERS.get as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
+        null,
+      )
       const result = await loadGlobalAuthFromKV(mockEnv)
       expect(result.state).toBe('absent')
     })
@@ -99,7 +107,7 @@ describe('reliability hardening', () => {
     it('checkTwoTierAuth allows valid global auth when configured', () => {
       const configs: AuthConfig[] = [{ header: 'Authorization', value: 'Bearer t' }]
       const request = new Request('https://proxy.example.com/api/x', {
-        headers: { Authorization: 'Bearer t' }
+        headers: { Authorization: 'Bearer t' },
       })
       const result = checkTwoTierAuth(request, true, configs, [])
       expect(result.authenticated).toBe(true)
@@ -108,13 +116,13 @@ describe('reliability hardening', () => {
 
     it('checkTwoTierAuth allows per-server auth when global configured but per-server matches', () => {
       const request = new Request('https://proxy.example.com/api/x', {
-        headers: { 'X-API-Key': 'k' }
+        headers: { 'X-API-Key': 'k' },
       })
       const result = checkTwoTierAuth(
         request,
         true,
         [{ header: 'Authorization', value: 'Bearer global' }],
-        [{ header: 'X-API-Key', value: 'k' }]
+        [{ header: 'X-API-Key', value: 'k' }],
       )
       expect(result.authenticated).toBe(true)
       expect(result.usedGlobalAuth).toBe(false)
@@ -123,17 +131,19 @@ describe('reliability hardening', () => {
 
   describe('reserved global-auth-configs key', () => {
     it('cannot be used as a route server key even when it holds valid global auth', async () => {
-      vi.mocked(mockEnv.PROXY_SERVERS.get).mockImplementation(async (key: string) =>
+      vi.mocked(
+        mockEnv.PROXY_SERVERS.get as unknown as ReturnType<typeof vi.fn>,
+      ).mockImplementation(async (key: string) =>
         key === 'global-auth-configs'
           ? JSON.stringify([{ header: 'Authorization', value: 'Bearer global' }])
-          : null
+          : null,
       )
 
       const response = await worker.fetch(
         new Request('https://proxy.example.com/global-auth-configs/x', {
-          headers: { Authorization: 'Bearer global' }
+          headers: { Authorization: 'Bearer global' },
         }),
-        mockEnv
+        mockEnv,
       )
       expect(response.status).toBe(404)
     })
@@ -142,11 +152,11 @@ describe('reliability hardening', () => {
   describe('legacy auth fields rejected fail-closed', () => {
     it.each([
       ['auth', { url: 'https://api.example.com', auth: 'Bearer x' }],
-      ['authHeader', { url: 'https://api.example.com', authHeader: 'X-API-Key' }]
+      ['authHeader', { url: 'https://api.example.com', authHeader: 'X-API-Key' }],
     ])('rejects config with %s field', async (_field, config) => {
-      vi.mocked(mockEnv.PROXY_SERVERS.get).mockImplementation(async (key: string) =>
-        key === 'api' ? config : null
-      )
+      vi.mocked(
+        mockEnv.PROXY_SERVERS.get as unknown as ReturnType<typeof vi.fn>,
+      ).mockImplementation(async (key: string) => (key === 'api' ? config : null))
 
       const response = await worker.fetch(new Request('https://proxy.example.com/api/x'), mockEnv)
       expect(response.status).toBe(500)
@@ -155,16 +165,20 @@ describe('reliability hardening', () => {
 
   describe('header handling', () => {
     it('configured headers override client headers', async () => {
-      vi.mocked(mockEnv.PROXY_SERVERS.get).mockImplementation(async (key: string) =>
+      vi.mocked(
+        mockEnv.PROXY_SERVERS.get as unknown as ReturnType<typeof vi.fn>,
+      ).mockImplementation(async (key: string) =>
         key === 'api'
           ? { url: 'https://api.example.com', headers: { 'X-Override': 'from-config' } }
-          : null
+          : null,
       )
       mockFetch.mockResolvedValue(new Response('ok'))
 
       await worker.fetch(
-        new Request('https://proxy.example.com/api/x', { headers: { 'X-Override': 'from-client' } }),
-        mockEnv
+        new Request('https://proxy.example.com/api/x', {
+          headers: { 'X-Override': 'from-client' },
+        }),
+        mockEnv,
       )
 
       const called = mockFetch.mock.calls[0][0] as Request
@@ -172,7 +186,11 @@ describe('reliability hardening', () => {
     })
 
     it('strips Host and hop-by-hop headers', async () => {
-      vi.mocked(mockEnv.PROXY_SERVERS.get).mockImplementation(async (key: string) => key === 'api' ? { url: 'https://api.example.com' } : null)
+      vi.mocked(
+        mockEnv.PROXY_SERVERS.get as unknown as ReturnType<typeof vi.fn>,
+      ).mockImplementation(async (key: string) =>
+        key === 'api' ? { url: 'https://api.example.com' } : null,
+      )
       mockFetch.mockResolvedValue(new Response('ok'))
 
       await worker.fetch(
@@ -183,28 +201,43 @@ describe('reliability hardening', () => {
             'Keep-Alive': 'timeout=5',
             'Proxy-Authenticate': 'Basic',
             'Proxy-Authorization': 'Basic xxx',
-            'TE': 'trailers',
-            'Trailer': 'X-Sum',
+            TE: 'trailers',
+            Trailer: 'X-Sum',
             'Transfer-Encoding': 'chunked',
             Upgrade: 'websocket',
-            'X-Keep': 'yes'
-          }
+            'X-Keep': 'yes',
+          },
         }),
-        mockEnv
+        mockEnv,
       )
 
       const called = mockFetch.mock.calls[0][0] as Request
-      for (const h of ['Host', 'Connection', 'Keep-Alive', 'Proxy-Authenticate', 'Proxy-Authorization', 'TE', 'Trailer', 'Transfer-Encoding', 'Upgrade']) {
+      for (const h of [
+        'Host',
+        'Connection',
+        'Keep-Alive',
+        'Proxy-Authenticate',
+        'Proxy-Authorization',
+        'TE',
+        'Trailer',
+        'Transfer-Encoding',
+        'Upgrade',
+      ]) {
         expect(called.headers.get(h)).toBeNull()
       }
       expect(called.headers.get('X-Keep')).toBe('yes')
     })
 
     it('uses manual redirects so credentials are not replayed cross-origin', async () => {
-      vi.mocked(mockEnv.PROXY_SERVERS.get).mockImplementation(async (key: string) =>
+      vi.mocked(
+        mockEnv.PROXY_SERVERS.get as unknown as ReturnType<typeof vi.fn>,
+      ).mockImplementation(async (key: string) =>
         key === 'api'
-          ? { url: 'https://api.example.com', headers: { Authorization: 'Bearer configured-token' } }
-          : null
+          ? {
+              url: 'https://api.example.com',
+              headers: { Authorization: 'Bearer configured-token' },
+            }
+          : null,
       )
       mockFetch.mockResolvedValue(new Response('ok'))
 
@@ -215,39 +248,51 @@ describe('reliability hardening', () => {
     })
 
     it('rejects configured header with invalid name characters', async () => {
-      vi.mocked(mockEnv.PROXY_SERVERS.get).mockResolvedValue({
-        url: 'https://api.example.com',
-        headers: { 'Bad Header\n': 'v' }
-      })
+      vi.mocked(mockEnv.PROXY_SERVERS.get as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
+        {
+          url: 'https://api.example.com',
+          headers: { 'Bad Header\n': 'v' },
+        },
+      )
 
       const response = await worker.fetch(new Request('https://proxy.example.com/api/x'), mockEnv)
       expect(response.status).toBe(500)
     })
 
     it('rejects configured header with control characters in value', async () => {
-      vi.mocked(mockEnv.PROXY_SERVERS.get).mockResolvedValue({
-        url: 'https://api.example.com',
-        headers: { 'X-Bad': 'value\r\ninjected: yes' }
-      })
+      vi.mocked(mockEnv.PROXY_SERVERS.get as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
+        {
+          url: 'https://api.example.com',
+          headers: { 'X-Bad': 'value\r\ninjected: yes' },
+        },
+      )
 
       const response = await worker.fetch(new Request('https://proxy.example.com/api/x'), mockEnv)
       expect(response.status).toBe(500)
     })
 
     it('preserves streaming body', async () => {
-      vi.mocked(mockEnv.PROXY_SERVERS.get).mockImplementation(async (key: string) => key === 'api' ? { url: 'https://api.example.com' } : null)
+      vi.mocked(
+        mockEnv.PROXY_SERVERS.get as unknown as ReturnType<typeof vi.fn>,
+      ).mockImplementation(async (key: string) =>
+        key === 'api' ? { url: 'https://api.example.com' } : null,
+      )
       mockFetch.mockResolvedValue(new Response('ok'))
 
       const body = new ReadableStream({
         start(controller) {
           controller.enqueue(new TextEncoder().encode('chunk'))
           controller.close()
-        }
+        },
       })
 
       await worker.fetch(
-        new Request('https://proxy.example.com/api/x', { method: 'POST', body, duplex: 'half' } as RequestInit),
-        mockEnv
+        new Request('https://proxy.example.com/api/x', {
+          method: 'POST',
+          body,
+          duplex: 'half',
+        } as RequestInit),
+        mockEnv,
       )
 
       const called = mockFetch.mock.calls[0][0] as Request
@@ -256,7 +301,11 @@ describe('reliability hardening', () => {
     })
 
     it('composes backend URL without dropping path or duplicating slashes', async () => {
-      vi.mocked(mockEnv.PROXY_SERVERS.get).mockImplementation(async (key: string) => key === 'api' ? { url: 'https://api.example.com/base/' } : null)
+      vi.mocked(
+        mockEnv.PROXY_SERVERS.get as unknown as ReturnType<typeof vi.fn>,
+      ).mockImplementation(async (key: string) =>
+        key === 'api' ? { url: 'https://api.example.com/base/' } : null,
+      )
       mockFetch.mockResolvedValue(new Response('ok'))
 
       await worker.fetch(new Request('https://proxy.example.com/api/users/1?q=2'), mockEnv)
@@ -266,7 +315,11 @@ describe('reliability hardening', () => {
     })
 
     it('keeps root path requests pointing at base URL root', async () => {
-      vi.mocked(mockEnv.PROXY_SERVERS.get).mockImplementation(async (key: string) => key === 'api' ? { url: 'https://api.example.com' } : null)
+      vi.mocked(
+        mockEnv.PROXY_SERVERS.get as unknown as ReturnType<typeof vi.fn>,
+      ).mockImplementation(async (key: string) =>
+        key === 'api' ? { url: 'https://api.example.com' } : null,
+      )
       mockFetch.mockResolvedValue(new Response('ok'))
 
       await worker.fetch(new Request('https://proxy.example.com/api/'), mockEnv)
@@ -299,20 +352,26 @@ describe('runtime review findings', () => {
   })
 
   function serverConfig(config: unknown) {
-    return vi.mocked(mockEnv.PROXY_SERVERS.get).mockImplementation(async (key: string) =>
-      key === 'api' ? config : key === 'global-auth-configs' ? null : null
-    )
+    return vi
+      .mocked(mockEnv.PROXY_SERVERS.get as unknown as ReturnType<typeof vi.fn>)
+      .mockImplementation(async (key: string) =>
+        key === 'api' ? config : key === 'global-auth-configs' ? null : null,
+      )
   }
 
   it('returns 503-ish generic 500 for KV retrieval failures (not 404)', async () => {
-    vi.mocked(mockEnv.PROXY_SERVERS.get).mockImplementation(async (key: string) => {
-      if (key === 'api') throw new Error('KV internal error')
-      return null
-    })
+    vi.mocked(mockEnv.PROXY_SERVERS.get as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+      async (key: string) => {
+        if (key === 'api') throw new Error('KV internal error')
+        return null
+      },
+    )
 
     const response = await worker.fetch(new Request('https://proxy.example.com/api/x'), mockEnv)
     expect(response.status).toBe(500)
-    expect(await response.text()).toBe('{"error":"Configuration invalid: Server setup requires review."}')
+    expect(await response.text()).toBe(
+      '{"error":"Configuration invalid: Server setup requires review."}',
+    )
   })
 
   it('returns 404 for missing route and generic 500 for malformed KV JSON', async () => {
@@ -321,7 +380,9 @@ describe('runtime review findings', () => {
     // malformed structure (string instead of object) must give generic 500.
     const response = await worker.fetch(new Request('https://proxy.example.com/api/x'), mockEnv)
     expect(response.status).toBe(500)
-    expect(await response.text()).toBe('{"error":"Configuration invalid: Server setup requires review."}')
+    expect(await response.text()).toBe(
+      '{"error":"Configuration invalid: Server setup requires review."}',
+    )
   })
 
   it('type-guards malformed auth entries: non-array authConfigs gives generic 500, no TypeError', async () => {
@@ -338,7 +399,9 @@ describe('runtime review findings', () => {
 
     const response = await worker.fetch(new Request('https://proxy.example.com/api/x'), mockEnv)
     expect(response.status).toBe(500)
-    expect(await response.text()).toBe('{"error":"Configuration invalid: Server setup requires review."}')
+    expect(await response.text()).toBe(
+      '{"error":"Configuration invalid: Server setup requires review."}',
+    )
   })
 
   it('type-guards malformed auth entries before auth matching: entry with non-string header does not crash', async () => {
@@ -349,7 +412,10 @@ describe('runtime review findings', () => {
   })
 
   it('validation failure returns generic config-invalid body, no internals leaked', async () => {
-    serverConfig({ url: 'https://api.example.com', authConfigs: [{ header: 'bad header', value: 'v' }] })
+    serverConfig({
+      url: 'https://api.example.com',
+      authConfigs: [{ header: 'bad header', value: 'v' }],
+    })
 
     const response = await worker.fetch(new Request('https://proxy.example.com/api/x'), mockEnv)
     expect(response.status).toBe(500)

@@ -1,7 +1,7 @@
-import { execFileSync } from 'child_process';
-import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
+import { execFileSync } from 'child_process'
+import * as fs from 'fs'
+import * as path from 'path'
+import * as os from 'os'
 
 /**
  * Shared Wrangler invocation helper for configuration scripts.
@@ -14,31 +14,31 @@ import * as os from 'os';
  * - Nonzero exits throw, so callers cannot mistake failure for success.
  */
 export function runWrangler(args: string[], opts: { input?: string } = {}): string {
-  const fullArgs = [...args, '--config', 'wrangler.toml', '--remote'];
+  const fullArgs = [...args, '--config', 'wrangler.toml', '--remote']
   const output = execFileSync('wrangler', fullArgs, {
     encoding: 'utf-8',
     shell: false,
     stdio: ['pipe', 'pipe', 'pipe'],
-    ...(opts.input !== undefined ? { input: opts.input } : {})
-  });
-  return output.trim();
+    ...(opts.input !== undefined ? { input: opts.input } : {}),
+  })
+  return output.trim()
 }
 
 /**
  * Route IDs are KV keys that map to server configs. Restrict them to a
  * conservative safe set and reject the reserved global auth key.
  */
-export const GLOBAL_AUTH_KV_KEY = 'global-auth-configs';
-const MAX_ROUTE_ID_LENGTH = 64;
+export const GLOBAL_AUTH_KV_KEY = 'global-auth-configs'
+const MAX_ROUTE_ID_LENGTH = 64
 
 export function isValidRouteId(id: string): boolean {
   if (typeof id !== 'string' || id.length === 0 || id.length > MAX_ROUTE_ID_LENGTH) {
-    return false;
+    return false
   }
   if (id === GLOBAL_AUTH_KV_KEY) {
-    return false;
+    return false
   }
-  return /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(id);
+  return /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(id)
 }
 
 /**
@@ -46,34 +46,38 @@ export function isValidRouteId(id: string): boolean {
  * caller never mistakes it for an empty namespace.
  */
 export function parseKeyList(output: string): { name: string }[] {
-  let parsed: unknown;
+  let parsed: unknown
   try {
-    parsed = JSON.parse(output);
+    parsed = JSON.parse(output)
   } catch {
-    throw new Error(`KV key list returned malformed JSON: ${output.slice(0, 200)}`);
+    throw new Error(`KV key list returned malformed JSON: ${output.slice(0, 200)}`)
   }
   if (!Array.isArray(parsed)) {
-    throw new Error('KV key list returned malformed output: expected an array');
+    throw new Error('KV key list returned malformed output: expected an array')
   }
   for (const [index, entry] of parsed.entries()) {
-    if (entry === null || typeof entry !== 'object' || typeof (entry as { name?: unknown }).name !== 'string') {
-      throw new Error(`KV key list returned malformed entry at index ${index}`);
+    if (
+      entry === null ||
+      typeof entry !== 'object' ||
+      typeof (entry as { name?: unknown }).name !== 'string'
+    ) {
+      throw new Error(`KV key list returned malformed entry at index ${index}`)
     }
   }
-  return parsed as { name: string }[];
+  return parsed as { name: string }[]
 }
 
-export { isValidHeaderName } from '../src/utils/auth-helpers';
+export { isValidHeaderName } from '../src/utils/auth-helpers'
 
 /**
  * Writes data to a uniquely named temp file created with 0600 permissions
  * and returns its path. Caller is responsible for cleanup.
  */
 export function writeTempFile(prefix: string, data: string): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
-  const file = path.join(dir, 'value.json');
-  fs.writeFileSync(file, data, { mode: 0o600 });
-  return file;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix))
+  const file = path.join(dir, 'value.json')
+  fs.writeFileSync(file, data, { mode: 0o600 })
+  return file
 }
 
 /**
@@ -81,10 +85,10 @@ export function writeTempFile(prefix: string, data: string): string {
  * writeTempFile). Safe to call with null; never throws.
  */
 export function cleanupTempFile(file: string | null): void {
-  if (!file) return;
+  if (!file) return
   try {
-    fs.unlinkSync(file);
-    fs.rmdirSync(path.dirname(file));
+    fs.unlinkSync(file)
+    fs.rmdirSync(path.dirname(file))
   } catch {
     // best effort cleanup
   }

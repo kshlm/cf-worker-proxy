@@ -1,27 +1,27 @@
-import { ServerConfig, ErrorDetails, AuthConfig } from './types';
-import { isValidHeaderValue, isValidHeaderName } from './utils/auth-helpers';
-import { PROTOCOLS } from './constants';
+import { ServerConfig, ErrorDetails, AuthConfig } from './types'
+import { isValidHeaderValue, isValidHeaderName } from './utils/auth-helpers'
+import { PROTOCOLS } from './constants'
 
 /**
  * Configuration validation result
  */
 export interface ValidationResult {
-  isValid: boolean;
-  error?: ErrorDetails;
+  isValid: boolean
+  error?: ErrorDetails
 }
 
 /**
  * Legacy auth fields removed from the runtime. Their presence in a server
  * config is a rejection, never a silent ignore.
  */
-const LEGACY_AUTH_FIELDS = ['auth', 'authHeader'] as const;
+const LEGACY_AUTH_FIELDS = ['auth', 'authHeader'] as const
 
 /**
  * Validates a backend URL to ensure it's properly formatted and secure
  */
 export function validateBackendUrl(url: string): ValidationResult {
   try {
-    const parsedUrl = new URL(url);
+    const parsedUrl = new URL(url)
 
     // Check if protocol is HTTPS
     if (parsedUrl.protocol !== PROTOCOLS.HTTPS) {
@@ -30,9 +30,9 @@ export function validateBackendUrl(url: string): ValidationResult {
         error: {
           message: 'Configuration invalid: Backend URL is malformed or insecure.',
           status: 500,
-          context: `URL "${url}" uses protocol "${parsedUrl.protocol}" instead of "https:"`
-        }
-      };
+          context: `URL "${url}" uses protocol "${parsedUrl.protocol}" instead of "https:"`,
+        },
+      }
     }
 
     // Check if hostname exists
@@ -42,21 +42,21 @@ export function validateBackendUrl(url: string): ValidationResult {
         error: {
           message: 'Configuration invalid: Backend URL is malformed or insecure.',
           status: 500,
-          context: `URL "${url}" has no hostname`
-        }
-      };
+          context: `URL "${url}" has no hostname`,
+        },
+      }
     }
 
-    return { isValid: true };
+    return { isValid: true }
   } catch (error) {
     return {
       isValid: false,
       error: {
         message: 'Configuration invalid: Backend URL is malformed or insecure.',
         status: 500,
-        context: `Failed to parse URL "${url}": ${error instanceof Error ? error.message : 'Unknown error'}`
-      }
-    };
+        context: `Failed to parse URL "${url}": ${error instanceof Error ? error.message : 'Unknown error'}`,
+      },
+    }
   }
 }
 
@@ -71,9 +71,9 @@ export function validateAuthConfig(authConfig: AuthConfig): ValidationResult {
       error: {
         message: 'Configuration invalid: Auth header name contains invalid characters.',
         status: 500,
-        context: `AuthConfig.header "${authConfig.header}" contains invalid characters`
-      }
-    };
+        context: `AuthConfig.header "${authConfig.header}" contains invalid characters`,
+      },
+    }
   }
 
   // Validate header value
@@ -83,9 +83,9 @@ export function validateAuthConfig(authConfig: AuthConfig): ValidationResult {
       error: {
         message: 'Configuration invalid: Auth header value cannot be empty.',
         status: 500,
-        context: `AuthConfig.value for header "${authConfig.header}" is required but empty`
-      }
-    };
+        context: `AuthConfig.value for header "${authConfig.header}" is required but empty`,
+      },
+    }
   }
 
   // Validate header value format
@@ -95,12 +95,12 @@ export function validateAuthConfig(authConfig: AuthConfig): ValidationResult {
       error: {
         message: 'Configuration invalid: Auth header value contains invalid characters.',
         status: 500,
-        context: `AuthConfig.value for header "${authConfig.header}" contains invalid characters`
-      }
-    };
+        context: `AuthConfig.value for header "${authConfig.header}" contains invalid characters`,
+      },
+    }
   }
 
-  return { isValid: true };
+  return { isValid: true }
 }
 
 /**
@@ -108,7 +108,7 @@ export function validateAuthConfig(authConfig: AuthConfig): ValidationResult {
  */
 export function validateAuthConfigs(authConfigs?: AuthConfig[]): ValidationResult {
   if (!authConfigs) {
-    return { isValid: true }; // No auth configs
+    return { isValid: true } // No auth configs
   }
 
   // Check if authConfigs is an array
@@ -118,40 +118,40 @@ export function validateAuthConfigs(authConfigs?: AuthConfig[]): ValidationResul
       error: {
         message: 'Configuration invalid: authConfigs must be an array.',
         status: 500,
-        context: 'authConfigs is not an array'
-      }
-    };
+        context: 'authConfigs is not an array',
+      },
+    }
   }
 
   // Validate each auth config, rejecting duplicate header names (case-insensitive)
-  const seenHeaders = new Set<string>();
+  const seenHeaders = new Set<string>()
   for (const [index, authConfig] of authConfigs.entries()) {
-    const headerKey = authConfig.header.toLowerCase();
+    const headerKey = authConfig.header.toLowerCase()
     if (seenHeaders.has(headerKey)) {
       return {
         isValid: false,
         error: {
           message: 'Configuration invalid: Duplicate auth header names are not allowed.',
           status: 500,
-          context: `authConfigs header "${authConfig.header}" appears more than once`
-        }
-      };
+          context: `authConfigs header "${authConfig.header}" appears more than once`,
+        },
+      }
     }
-    seenHeaders.add(headerKey);
+    seenHeaders.add(headerKey)
 
-    const validation = validateAuthConfig(authConfig);
+    const validation = validateAuthConfig(authConfig)
     if (!validation.isValid) {
       return {
         isValid: false,
         error: {
           ...validation.error!,
-          context: `${validation.error!.context} (at index ${index})`
-        }
-      };
+          context: `${validation.error!.context} (at index ${index})`,
+        },
+      }
     }
   }
 
-  return { isValid: true };
+  return { isValid: true }
 }
 
 /**
@@ -159,21 +159,20 @@ export function validateAuthConfigs(authConfigs?: AuthConfig[]): ValidationResul
  */
 export function validateAuthentication(authConfigs?: AuthConfig[]): ValidationResult {
   // Validate authConfigs
-  const authConfigsValidation = validateAuthConfigs(authConfigs);
+  const authConfigsValidation = validateAuthConfigs(authConfigs)
   if (!authConfigsValidation.isValid) {
-    return authConfigsValidation;
+    return authConfigsValidation
   }
 
-  return { isValid: true };
+  return { isValid: true }
 }
-
 
 /**
  * Validates custom headers configuration
  */
 export function validateHeaders(headers?: Record<string, string>): ValidationResult {
   if (!headers) {
-    return { isValid: true }; // No custom headers
+    return { isValid: true } // No custom headers
   }
 
   // Check if headers is an object
@@ -183,9 +182,9 @@ export function validateHeaders(headers?: Record<string, string>): ValidationRes
       error: {
         message: 'Configuration invalid: Headers must be an object.',
         status: 500,
-        context: 'Headers configuration is not a valid object'
-      }
-    };
+        context: 'Headers configuration is not a valid object',
+      },
+    }
   }
 
   // Validate each header: names must be valid HTTP tokens, values must be
@@ -197,24 +196,25 @@ export function validateHeaders(headers?: Record<string, string>): ValidationRes
         error: {
           message: 'Configuration invalid: Header names must be valid HTTP header tokens.',
           status: 500,
-          context: `Invalid header name: "${headerName}"`
-        }
-      };
+          context: `Invalid header name: "${headerName}"`,
+        },
+      }
     }
 
     if (typeof headerValue !== 'string' || !isValidHeaderValue(headerValue)) {
       return {
         isValid: false,
         error: {
-          message: 'Configuration invalid: Header values must be strings without control characters.',
+          message:
+            'Configuration invalid: Header values must be strings without control characters.',
           status: 500,
-          context: `Header "${headerName}" has an invalid value`
-        }
-      };
+          context: `Header "${headerName}" has an invalid value`,
+        },
+      }
     }
   }
 
-  return { isValid: true };
+  return { isValid: true }
 }
 
 /**
@@ -222,36 +222,36 @@ export function validateHeaders(headers?: Record<string, string>): ValidationRes
  */
 export function validateProcessedConfig(config: ServerConfig): ValidationResult {
   // Reject removed legacy auth fields fail-closed
-  const record = config as unknown as Record<string, unknown>;
-  const legacyFields = LEGACY_AUTH_FIELDS.filter(field => record[field] !== undefined);
+  const record = config as unknown as Record<string, unknown>
+  const legacyFields = LEGACY_AUTH_FIELDS.filter((field) => record[field] !== undefined)
   if (legacyFields.length > 0) {
     return {
       isValid: false,
       error: {
         message: 'Configuration invalid: Legacy auth fields are no longer supported.',
         status: 500,
-        context: `Server config contains unsupported legacy field(s): ${legacyFields.join(', ')}. Use authConfigs instead.`
-      }
-    };
+        context: `Server config contains unsupported legacy field(s): ${legacyFields.join(', ')}. Use authConfigs instead.`,
+      },
+    }
   }
 
   // Validate URL
-  const urlValidation = validateBackendUrl(config.url);
+  const urlValidation = validateBackendUrl(config.url)
   if (!urlValidation.isValid) {
-    return urlValidation;
+    return urlValidation
   }
 
   // Validate authentication
-  const authValidation = validateAuthentication(config.authConfigs);
+  const authValidation = validateAuthentication(config.authConfigs)
   if (!authValidation.isValid) {
-    return authValidation;
+    return authValidation
   }
 
   // Validate headers
-  const headersValidation = validateHeaders(config.headers);
+  const headersValidation = validateHeaders(config.headers)
   if (!headersValidation.isValid) {
-    return headersValidation;
+    return headersValidation
   }
 
-  return { isValid: true };
+  return { isValid: true }
 }

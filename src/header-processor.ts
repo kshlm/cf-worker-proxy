@@ -1,10 +1,10 @@
-import { ServerConfig, AuthConfig } from './types';
+import { ServerConfig, AuthConfig } from './types'
 import {
   mergeAuthConfigs,
   createHeaderExclusionSet,
   createHeadersExcluding,
-  FORBIDDEN_FORWARD_HEADERS
-} from './utils/auth-helpers';
+  FORBIDDEN_FORWARD_HEADERS,
+} from './utils/auth-helpers'
 
 /**
  * Adds configured headers to the modified headers. Configured headers
@@ -13,14 +13,14 @@ import {
  */
 export function addCustomHeaders(
   modifiedHeaders: Headers,
-  customHeaders: Record<string, string>
+  customHeaders: Record<string, string>,
 ): void {
   if (!customHeaders) {
-    return;
+    return
   }
 
   for (const [headerName, headerValue] of Object.entries(customHeaders)) {
-    modifiedHeaders.set(headerName, headerValue);
+    modifiedHeaders.set(headerName, headerValue)
   }
 }
 
@@ -31,31 +31,28 @@ export function addCustomHeaders(
 export function processHeadersForProxy(
   originalRequest: Request,
   serverConfig: ServerConfig,
-  globalAuthConfigs: AuthConfig[] = []
+  globalAuthConfigs: AuthConfig[] = [],
 ): Headers {
   // Merge per-server auth configurations
-  const perServerAuthConfigs = mergeAuthConfigs(serverConfig);
+  const perServerAuthConfigs = mergeAuthConfigs(serverConfig)
 
   // Combine global and per-server auth configs for header removal
-  const allAuthConfigs = [...globalAuthConfigs, ...perServerAuthConfigs];
+  const allAuthConfigs = [...globalAuthConfigs, ...perServerAuthConfigs]
 
   // Create headers without authentication headers, Host, and hop-by-hop headers
-  const exclusionSet = createHeaderExclusionSet(allAuthConfigs);
+  const exclusionSet = createHeaderExclusionSet(allAuthConfigs)
   for (const forbidden of FORBIDDEN_FORWARD_HEADERS) {
-    exclusionSet.add(forbidden);
+    exclusionSet.add(forbidden)
   }
-  const processedHeaders = createHeadersExcluding(originalRequest.headers, exclusionSet);
+  const processedHeaders = createHeadersExcluding(originalRequest.headers, exclusionSet)
 
   // Add custom headers from configuration
-  addCustomHeaders(
-    processedHeaders,
-    serverConfig.headers || {}
-  );
+  addCustomHeaders(processedHeaders, serverConfig.headers || {})
 
-  return processedHeaders;
+  return processedHeaders
 }
 
 /**
  * Re-export header validation from utils for backward compatibility
  */
-export { isValidHeaderName, isValidHeaderValue } from './utils/auth-helpers';
+export { isValidHeaderName, isValidHeaderValue } from './utils/auth-helpers'

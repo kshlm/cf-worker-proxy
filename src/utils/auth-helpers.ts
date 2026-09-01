@@ -1,4 +1,4 @@
-import { AuthConfig, ServerConfig } from '../types';
+import { AuthConfig, ServerConfig } from '../types'
 
 /**
  * Returns auth configurations from server config
@@ -21,20 +21,20 @@ export const FORBIDDEN_FORWARD_HEADERS: ReadonlySet<string> = new Set([
   'te',
   'trailer',
   'transfer-encoding',
-  'upgrade'
-]);
+  'upgrade',
+])
 
 /**
  * Validates header value format
  */
 export function isValidHeaderValue(headerValue: string): boolean {
   if (typeof headerValue !== 'string') {
-    return false;
+    return false
   }
 
   // Basic validation - header values should not contain control characters
   // except for tab (0x09) and space (0x20)
-  return !/[\x00-\x08\x0A-\x1F\x7F]/u.test(headerValue);
+  return !/[\x00-\x08\x0A-\x1F\x7F]/u.test(headerValue)
 }
 
 /**
@@ -42,17 +42,17 @@ export function isValidHeaderValue(headerValue: string): boolean {
  */
 export function isValidHeaderName(headerName: string): boolean {
   if (typeof headerName !== 'string' || headerName.trim() === '') {
-    return false;
+    return false
   }
 
-  return /^[a-zA-Z0-9!#$%&'*+.^_`|~-]+$/.test(headerName);
+  return /^[a-zA-Z0-9!#$%&'*+.^_`|~-]+$/.test(headerName)
 }
 
 /**
  * Creates a Set of lowercase header names to exclude from forwarding
  */
 export function createHeaderExclusionSet(authConfigs: AuthConfig[]): Set<string> {
-  return new Set(authConfigs.map(config => config.header.toLowerCase()));
+  return new Set(authConfigs.map((config) => config.header.toLowerCase()))
 }
 
 /**
@@ -60,15 +60,15 @@ export function createHeaderExclusionSet(authConfigs: AuthConfig[]): Set<string>
  */
 export function createHeadersExcluding(
   originalHeaders: Headers,
-  excludeHeaders: Set<string>
+  excludeHeaders: Set<string>,
 ): Headers {
-  const modifiedHeaders = new Headers();
+  const modifiedHeaders = new Headers()
 
   originalHeaders.forEach((value, key) => {
     if (!excludeHeaders.has(key.toLowerCase())) {
-      modifiedHeaders.set(key, value);
+      modifiedHeaders.set(key, value)
     }
-  });
+  })
 
-  return modifiedHeaders;
+  return modifiedHeaders
 }

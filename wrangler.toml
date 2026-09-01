@@ -2,12 +2,6 @@ name = "worker-proxy"
 main = "src/index.ts"
 compatibility_date = "2025-09-15"
 
-[env.production.vars]
-ENVIRONMENT = "production"
-
-[env.development.vars]
-ENVIRONMENT = "development"
-
 [[kv_namespaces]]
 binding = "PROXY_SERVERS"
 id = "85f8312ab78f4214adf592da8e8f2ce4"

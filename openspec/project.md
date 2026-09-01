@@ -63,9 +63,9 @@ Key goals:
 - Example: `/api/users/123` → `api` server → `https://api.example.com/users/123`
 
 ### Authentication Model
-- **Legacy**: Single auth header with `auth` and `authHeader` configuration
-- **New**: Multiple auth headers via `authConfigs` array
-- **Logic**: Any one matching auth header grants access (OR logic)
+- **Per-server**: Multiple auth headers via `authConfigs` array; any one match grants access
+- **Global**: Optional two-tier layer via `GLOBAL_AUTH_CONFIGS` env var or the reserved `global-auth-configs` KV key; fail-closed on load/parse/validate errors
+- **Legacy fields**: `auth`/`authHeader` are rejected (500), never silently ignored
 - **Security**: Auth headers are stripped before forwarding to downstream services
 
 ### Header Processing

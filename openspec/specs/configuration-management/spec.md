@@ -101,8 +101,8 @@ The system SHALL ensure all configurations comply with the defined schema for Se
 
 #### Scenario: Legacy auth validation
 - **WHEN** configuration includes legacy `auth` and `authHeader`
-- **THEN** both SHALL be strings if present
-- **AND** the system SHALL validate string types
+- **THEN** the system SHALL reject the configuration
+- **AND** the validation error SHALL name the legacy fields
 
 #### Scenario: Optional field handling
 - **WHEN** configuration includes only required fields
@@ -159,9 +159,9 @@ The system SHALL validate configurations for security compliance and prevent ins
 The system SHALL support configuration format migrations and backward compatibility.
 
 #### Scenario: Legacy configuration format
-- **WHEN** encountering old configuration format
-- **THEN** the system SHALL migrate to new format
-- **AND** maintain backward compatibility
+- **WHEN** encountering old configuration format with `auth` or `authHeader`
+- **THEN** the system SHALL reject it with an error naming the fields
+- **AND** NOT apply any automatic conversion
 
 #### Scenario: Configuration version detection
 - **WHEN** loading configurations
@@ -170,8 +170,8 @@ The system SHALL support configuration format migrations and backward compatibil
 
 #### Scenario: Deprecated field handling
 - **WHEN** configuration contains deprecated fields
-- **THEN** the system SHALL handle them gracefully
-- **AND** provide migration warnings if needed
+- **THEN** the system SHALL reject them with an explicit migration error
+- **AND** NOT silently pass them through
 
 #### Scenario: New field addition
 - **WHEN** configuration schema adds new fields

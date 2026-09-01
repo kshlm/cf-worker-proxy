@@ -1,12 +1,12 @@
-import { Env, AuthConfig } from '../types';
-import { validateAuthConfigs } from '../config-validator';
-import { processGlobalAuthConfigs } from '../secret-interpolation';
+import { Env, AuthConfig } from '../types'
+import { validateAuthConfigs } from '../config-validator'
+import { processGlobalAuthConfigs } from '../secret-interpolation'
 
 /**
  * KV key reserved for global auth configuration. It is not a valid
  * server route key: requests routed to it must never resolve.
  */
-export const GLOBAL_AUTH_KV_KEY = 'global-auth-configs';
+export const GLOBAL_AUTH_KV_KEY = 'global-auth-configs'
 
 /**
  * Load state of the global auth configuration source:
@@ -14,7 +14,7 @@ export const GLOBAL_AUTH_KV_KEY = 'global-auth-configs';
  * - configured: a source exists and parsed/validated cleanly
  * - error: a source exists but could not be loaded, parsed, or validated
  */
-export type GlobalAuthState = 'absent' | 'configured' | 'error';
+export type GlobalAuthState = 'absent' | 'configured' | 'error'
 
 export interface GlobalAuthResult {
   state: GlobalAuthState
@@ -28,28 +28,28 @@ export interface GlobalAuthResult {
  */
 function parseGlobalAuthConfig(configJson: string): GlobalAuthResult {
   try {
-    const configs = JSON.parse(configJson) as AuthConfig[];
+    const configs = JSON.parse(configJson) as AuthConfig[]
 
-    const validation = validateAuthConfigs(configs);
+    const validation = validateAuthConfigs(configs)
     if (!validation.isValid) {
       return {
         state: 'error',
         configs: [],
-        error: `Global auth configuration invalid: ${validation.error?.message}`
-      };
+        error: `Global auth configuration invalid: ${validation.error?.message}`,
+      }
     }
 
     return {
       state: 'configured',
-      configs
-    };
+      configs,
+    }
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
     return {
       state: 'error',
       configs: [],
-      error: `Failed to parse global auth configuration: ${errorMessage}`
-    };
+      error: `Failed to parse global auth configuration: ${errorMessage}`,
+    }
   }
 }
 
@@ -58,13 +58,13 @@ function parseGlobalAuthConfig(configJson: string): GlobalAuthResult {
  * A present variable — even an empty array — counts as configured.
  */
 export async function loadGlobalAuthFromEnv(env: Env): Promise<GlobalAuthResult> {
-  const globalAuthConfig = env.GLOBAL_AUTH_CONFIGS;
+  const globalAuthConfig = env.GLOBAL_AUTH_CONFIGS
 
   if (globalAuthConfig === undefined) {
-    return { state: 'absent', configs: [] };
+    return { state: 'absent', configs: [] }
   }
 
-  return parseGlobalAuthConfig(globalAuthConfig);
+  return parseGlobalAuthConfig(globalAuthConfig)
 }
 
 /**
@@ -73,20 +73,20 @@ export async function loadGlobalAuthFromEnv(env: Env): Promise<GlobalAuthResult>
  */
 export async function loadGlobalAuthFromKV(env: Env): Promise<GlobalAuthResult> {
   try {
-    const globalAuthConfig = await env.PROXY_SERVERS.get(GLOBAL_AUTH_KV_KEY);
+    const globalAuthConfig = await env.PROXY_SERVERS.get(GLOBAL_AUTH_KV_KEY)
 
     if (globalAuthConfig === null || globalAuthConfig === undefined) {
-      return { state: 'absent', configs: [] };
+      return { state: 'absent', configs: [] }
     }
 
-    return parseGlobalAuthConfig(globalAuthConfig);
+    return parseGlobalAuthConfig(globalAuthConfig)
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
     return {
       state: 'error',
       configs: [],
-      error: `Failed to load global auth from KV: ${errorMessage}`
-    };
+      error: `Failed to load global auth from KV: ${errorMessage}`,
+    }
   }
 }
 
@@ -97,34 +97,34 @@ export async function loadGlobalAuthFromKV(env: Env): Promise<GlobalAuthResult> 
  * closed rather than treat global auth as unconfigured.
  */
 export async function loadGlobalAuthConfiguration(env: Env): Promise<GlobalAuthResult> {
-  const envResult = await loadGlobalAuthFromEnv(env);
+  const envResult = await loadGlobalAuthFromEnv(env)
   if (envResult.state === 'configured') {
-    return interpolateResult(envResult, env);
+    return interpolateResult(envResult, env)
   }
   if (envResult.state === 'error') {
-    return envResult;
+    return envResult
   }
 
-  const kvResult = await loadGlobalAuthFromKV(env);
+  const kvResult = await loadGlobalAuthFromKV(env)
   if (kvResult.state === 'configured') {
-    return interpolateResult(kvResult, env);
+    return interpolateResult(kvResult, env)
   }
-  return kvResult;
+  return kvResult
 }
 
 function interpolateResult(result: GlobalAuthResult, env: Env): GlobalAuthResult {
   try {
     return {
       ...result,
-      configs: processGlobalAuthConfigs(result.configs, env)
-    };
+      configs: processGlobalAuthConfigs(result.configs, env),
+    }
   } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error'
     return {
       state: 'error',
       configs: [],
-      error: `Global auth secret interpolation failed: ${errorMessage}`
-    };
+      error: `Global auth secret interpolation failed: ${errorMessage}`,
+    }
   }
 }
 
@@ -134,12 +134,12 @@ function interpolateResult(result: GlobalAuthResult, env: Env): GlobalAuthResult
  */
 export function checkGlobalAuth(request: Request, globalAuthConfigs: AuthConfig[]): boolean {
   if (globalAuthConfigs.length === 0) {
-    return false;
+    return false
   }
 
-  return globalAuthConfigs.some(config => {
-    const headerValue = request.headers.get(config.header);
-    if (!headerValue) return false;
-    return headerValue === config.value;
-  });
+  return globalAuthConfigs.some((config) => {
+    const headerValue = request.headers.get(config.header)
+    if (!headerValue) return false
+    return headerValue === config.value
+  })
 }

@@ -16,6 +16,7 @@ This project has been wholly coded by AI, with some minor fixes by me. using mai
 ## Quick Start
 
 1. Clone and install dependencies:
+
 ```bash
 git clone <repository>
 cd worker-proxy
@@ -23,6 +24,7 @@ bun install
 ```
 
 2. Configure your KV namespace:
+
 ```bash
 # Create a KV namespace
 wrangler kv:namespace create "PROXY_SERVERS"
@@ -31,17 +33,20 @@ wrangler kv:namespace create "PROXY_SERVERS"
 ```
 
 3. Set up proxy configuration:
+
 ```bash
 # Run the interactive configuration script
 bun run scripts/update-proxy-config.ts
 ```
 
 4. Test locally:
+
 ```bash
 bun run dev
 ```
 
 5. Deploy to Cloudflare:
+
 ```bash
 bun run deploy
 ```
@@ -62,6 +67,7 @@ bun run scripts/update-proxy-config.ts
 ```
 
 The script provides:
+
 - **Interactive setup**: Guided configuration for new proxy servers
 - **Multi-auth support**: Configure multiple authentication headers
 - **Secret generation**: Auto-generate secure tokens and save as Cloudflare secrets
@@ -90,6 +96,7 @@ bun run restore-config backups/proxy-config-backup-XXX.json --replace --confirm-
 ```
 
 Restore semantics:
+
 - The entire backup is validated with the runtime validator before the first remote write
 - Values are stored in KV verbatim; backups preserve raw values in a versioned document
 - Failures are reported per key; the process exits nonzero if any key failed
@@ -135,6 +142,7 @@ wrangler secret put SERVICE_KEY
 ```
 
 **Security Notes:**
+
 - Secrets are never logged or exposed in responses
 - Missing secrets in authentication values will cause requests to fail
 - Missing secrets in header values will fall back to the placeholder text
@@ -158,10 +166,11 @@ X-Custom-Auth: ${CUSTOM_AUTH_VALUE}
 Each server configuration supports:
 
 - `url` (required): Base URL of the downstream server (must be HTTPS)
-- `headers` (optional): Custom headers to add to outgoing requests (supports secret interpolation)
-- `auth` (optional): Required authentication header value for incoming requests (legacy)
-- `authHeader` (optional): Custom header name for authentication (defaults to `Authorization`) (legacy)
-- `authConfigs` (optional): Array of multiple authentication configurations (new)
+- `headers` (optional): Downstream headers; **override** client-supplied values with the same name (supports secret interpolation)
+- `authConfigs` (optional): Array of authentication configurations; access is granted if any one matches
+
+Legacy `auth` / `authHeader` fields are no longer supported: the runtime and
+the configuration scripts reject them with an error instead of ignoring them.
 
 ### Example Configuration
 
@@ -194,8 +203,12 @@ Here's an example configuration showing various features:
   },
   "custom-auth": {
     "url": "https://secure-api.example.com",
-    "auth": "${SECRET_API_KEY}",
-    "authHeader": "X-API-Key"
+    "authConfigs": [
+      {
+        "header": "X-API-Key",
+        "value": "${SECRET_API_KEY}"
+      }
+    ]
   },
   "multi-auth": {
     "url": "https://flexible-api.example.com",
@@ -223,12 +236,13 @@ The new `authConfigs` array supports multiple authentication methods with the fo
 
 ```typescript
 interface AuthConfig {
-  header: string        // Header name (e.g., "Authorization", "X-API-Key")
-  value: string         // Expected header value (supports ${SECRET_NAME} placeholders)
+  header: string // Header name (e.g., "Authorization", "X-API-Key")
+  value: string // Expected header value (supports ${SECRET_NAME} placeholders)
 }
 ```
 
 **Authentication Logic:**
+
 - **Any One Match**: Access is granted if any configured auth header matches
 - **All Headers Optional**: All auth headers are optional by default
 - **No Auth Headers Present**: If no auth headers are configured, access is granted without authentication
@@ -243,30 +257,36 @@ interface AuthConfig {
 
 The proxy forwards headers as follows:
 
-- **All incoming headers** are passed to the downstream server **except** the authentication headers
-  - Default: `Authorization` header is not forwarded
-  - Custom: If `authHeader` is configured, that header is not forwarded instead
-  - Multiple: All headers configured in `authConfigs` are not forwarded
-- **Configured headers** are added only if they don't already exist in the incoming request
-  - Incoming headers take priority over configured headers
-  - This allows clients to override default headers when needed
+- **All incoming headers** are passed to the downstream server **except**:
+  - Authentication headers configured in `authConfigs` (per-server and global)
+  - `Host` and hop-by-hop headers (`Connection`, `Keep-Alive`, `TE`, `Trailer`,
+    `Transfer-Encoding`, `Upgrade`, `Proxy-Authenticate`, `Proxy-Authorization`)
+- **Configured downstream headers override** client-supplied headers with the
+  same name. Clients cannot override values the operator configured for the
+  downstream service.
+
+The backend request is created with `redirect: 'manual'`, so a downstream 3xx
+response is passed through instead of being followed (following it would replay
+configured credentials to the redirect target).
 
 **Example:**
+
 ```json
 {
   "api": {
     "url": "https://api.example.com",
     "headers": { "X-Default": "${DEFAULT_VALUE}" },
-    "auth": "Bearer ${API_TOKEN}"
+    "authConfigs": [{ "header": "Authorization", "value": "Bearer ${API_TOKEN}" }]
   }
 }
 ```
 
-- Request with `X-Default: client-value` → downstream receives `X-Default: client-value` (client wins)
-- Request without `X-Default` → downstream receives `X-Default: config-value` (config provides default)
-- `Authorization` header is never forwarded to the downstream server
+- Request with `X-Default: client-value` → downstream receives `X-Default: <configured value>` (config overrides)
+- Request without `X-Default` → downstream receives `X-Default: <configured value>`
+- `Authorization` is removed before forwarding (configured in `authConfigs`)
 
 **Multiple Auth Headers Example:**
+
 ```json
 {
   "multi-auth": {
@@ -285,36 +305,31 @@ The proxy forwards headers as follows:
 
 ### Authentication
 
-If a server has an `auth` configuration, incoming requests must include a matching authentication header. By default, this is the `Authorization` header:
+If a server has an `authConfigs` array, incoming requests must include at least
+one header matching a configured value (any-one-match). If the required header
+is missing or doesn't match, the proxy returns a 401 Unauthorized response.
 
-#### Default Authorization Header
-```
-Authorization: Bearer required-token
-```
-
-#### Custom Authentication Header
-You can also specify a custom header name using `authHeader`:
+Example:
 
 ```json
 {
   "api": {
     "url": "https://api.example.com",
-    "auth": "secret-api-key-123",
-    "authHeader": "X-API-Key"
+    "authConfigs": [{ "header": "X-API-Key", "value": "secret-api-key-123" }]
   }
 }
 ```
 
 Then the incoming request must include:
+
 ```
 X-API-Key: secret-api-key-123
 ```
 
-If the required header is missing or doesn't match, the proxy returns a 401 Unauthorized response.
-
 #### Multiple Authentication Examples
 
 **Example 1: Any One Valid Header**
+
 ```json
 {
   "flexible-api": {
@@ -326,12 +341,14 @@ If the required header is missing or doesn't match, the proxy returns a 401 Unau
   }
 }
 ```
+
 - Request with `Authorization: Bearer token123` → ✅ Success
 - Request with `X-API-Key: key456` → ✅ Success
 - Request with `Authorization: wrong` → ❌ 401 Unauthorized
 - Request with no auth headers → ✅ Success (all optional)
 
 **Example 2: Service-Specific Authentication**
+
 ```json
 {
   "service-api": {
@@ -343,12 +360,14 @@ If the required header is missing or doesn't match, the proxy returns a 401 Unau
   }
 }
 ```
+
 - Request with `X-Service-Token: service789` → ✅ Success
 - Request with `Authorization: Bearer token123` → ✅ Success
 - Request with both headers → ✅ Success (any one match is sufficient)
 - Request with no headers → ❌ 401 Unauthorized (auth configured but none provided)
 
 **Example 3: Multiple API Key Support**
+
 ```json
 {
   "multi-key-api": {
@@ -361,54 +380,10 @@ If the required header is missing or doesn't match, the proxy returns a 401 Unau
   }
 }
 ```
+
 - Supports multiple authentication methods for backward compatibility
 - Clients can use any of the configured authentication methods
 - Useful during API migrations or when supporting multiple client types
-
-#### Backward Compatibility & Migration
-
-**Legacy configurations continue to work unchanged:**
-```json
-{
-  "legacy-api": {
-    "url": "https://api.example.com",
-    "auth": "Bearer required-token",
-    "authHeader": "Authorization"
-  }
-}
-```
-
-**Mixed configurations (legacy + new):**
-```json
-{
-  "mixed-api": {
-    "url": "https://api.example.com",
-    "auth": "Bearer legacy-token",
-    "authHeader": "X-Legacy-Auth",
-    "authConfigs": [
-      { "header": "Authorization", "value": "Bearer new-token" }
-    ]
-  }
-}
-```
-- Both `Authorization: Bearer new-token` and `X-Legacy-Auth: Bearer legacy-token` will work
-- If header names conflict, `authConfigs` takes precedence
-
-**Migration from legacy to new format:**
-```json
-// Before (legacy)
-{
-  "auth": "Bearer token123",
-  "authHeader": "X-API-Key"
-}
-
-// After (new)
-{
-  "authConfigs": [
-    { "header": "X-API-Key", "value": "Bearer ${API_TOKEN}" }
-  ]
-}
-```
 
 #### Global Authentication
 
@@ -417,6 +392,7 @@ Global authentication provides a master authentication layer that applies across
 **Configuration Methods:**
 
 1. **Environment Variable** (recommended for production):
+
 ```bash
 wrangler secret put GLOBAL_AUTH_CONFIGS
 # Enter JSON array when prompted:
@@ -424,6 +400,7 @@ wrangler secret put GLOBAL_AUTH_CONFIGS
 ```
 
 2. **KV Storage** (fallback method):
+
 ```bash
 # Using the configuration script
 bun run scripts/update-proxy-config.ts
@@ -433,6 +410,7 @@ bun run scripts/update-proxy-config.ts
 **Global Auth Examples:**
 
 **Example 1: Single Global Admin Token**
+
 ```json
 [
   {
@@ -443,10 +421,11 @@ bun run scripts/update-proxy-config.ts
 ```
 
 **Example 2: Multiple Global Auth Methods**
+
 ```json
 [
   {
-    "header": "Authorization", 
+    "header": "Authorization",
     "value": "Bearer ${MASTER_TOKEN}"
   },
   {
@@ -462,10 +441,11 @@ bun run scripts/update-proxy-config.ts
 
 **Two-Tier Authentication Flow:**
 
-1. **Global Auth First**: System checks global authentication if configured
+1. **Global Auth First**: System checks global authentication if a source exists (`GLOBAL_AUTH_CONFIGS` env var or the `global-auth-configs` KV key)
 2. **Override Behavior**: Valid global auth grants access immediately (per-server auth skipped)
-3. **Fallback Logic**: If global auth fails, system falls back to per-server authentication
-4. **Mandatory Auth**: When global auth is configured, some form of authentication is always required
+3. **Fallback Logic**: If global auth fails, per-server authentication may still grant access
+4. **Mandatory Auth**: When global auth is configured — even with an empty array — authentication is always required; servers without their own auth are denied
+5. **Fail Closed**: If a configured global auth source fails to load, parse, or validate, the worker returns 500 and never degrades to open access
 
 **Use Cases:**
 
@@ -483,32 +463,38 @@ bun run scripts/update-proxy-config.ts
 
 ## Development
 
+Bun is the only supported package manager.
+
 ```bash
+# Install dependencies
+bun install
+
 # Start development server
 bun run dev
 
-# Run tests
+# Run everything: typecheck, lint, format check, tests
+bun run check
+
+# Individually
+bun run typecheck   # src, scripts, and tests
+bun run lint        # src, scripts, and tests
+bun run format:check
 bun run test
-
-# Type checking
-bun run typecheck
-
-# Linting
-bun run lint
-
-# Format code
-bun run format
+bun run test:coverage
 ```
 
 ## Deployment
 
 ```bash
+# Validate the worker bundles without deploying (dry run)
+bun run build
+
 # Deploy to production
 bun run deploy
-
-# Deploy with specific environment
-bun run deploy --env production
 ```
+
+Continuous integration runs `bun install --frozen-lockfile` and `bun run check`
+on every push and pull request to main (see `.github/workflows/ci.yml`).
 
 ## Error Handling
 
@@ -516,5 +502,3 @@ bun run deploy --env production
 - `401 Unauthorized`: Authentication required but missing or invalid
 - `500 Internal Server Error`: Configuration errors or invalid backend URLs
 - `502 Bad Gateway`: Backend server is unreachable
-
-
