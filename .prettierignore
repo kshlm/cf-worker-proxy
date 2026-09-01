@@ -5,6 +5,7 @@ backups
 coverage
 dist
 openspec
+proxy-config-backup-*.json
 .crush.json
 .mcp.json
 AGENTS.md

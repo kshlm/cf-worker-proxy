@@ -19,3 +19,4 @@ coverage
 
 # Config backups (contain configuration values)
 backups/
+proxy-config-backup-*.json
