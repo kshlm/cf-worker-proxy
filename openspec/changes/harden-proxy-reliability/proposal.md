@@ -7,10 +7,10 @@ A full reliability audit found structural and security defects across the runtim
 ## What Changes
 
 **Runtime (src/)**
-- **Fail-closed global auth**: if global auth is configured (env or KV) but fails to load, parse, or validate, the worker returns 500 and never falls back to per-server or open access. Empty global auth config means "not configured", not "allow all".
+- **Fail-closed global auth**: a present global auth source — `GLOBAL_AUTH_CONFIGS` (including an empty array) or the `global-auth-configs` KV key — counts as configured and requires authentication. Load, parse, validation, or secret-interpolation failures return 500 and never fall back to per-server or open access.
 - **Reject removed legacy auth fields**: server configs containing `auth` or `authHeader` fail validation with a clear error, forcing operators to migrate to `authConfigs`.
 - **Redirect/header safety**: forwarded requests explicitly opt out of redirect following (`redirect: 'manual'` unless the caller specifies otherwise); header construction drops the dead no-op branch that builds an empty exclusion set.
-- **Dead code cleanup**: remove duplicate `Authentication Header Security` requirement remnants in code paths, the unused `checkAuth` export if superseded, and the no-op `convertLegacyToMultiAuth`/`cleanupConfigForSaving` functions in scripts.
+- **Dead code cleanup**: remove the no-op `convertLegacyToMultiAuth` and `cleanupConfigForSaving` functions in scripts, and the dead no-op branch in `processHeadersForProxy` where both sides of a conditional are identical.
 
 **Configuration tooling (scripts/)**
 - **One validation path**: `update-proxy-config.ts` deletes its local `validateAuthConfigs` copy and imports `validateAuthConfigs` / `validateAuthConfig` from `src/config-validator.ts`, adding the duplicate-header check to the shared validator.

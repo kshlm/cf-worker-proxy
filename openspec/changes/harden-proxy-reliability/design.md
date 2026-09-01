@@ -13,11 +13,15 @@ The audit (branch `fix/reliability-hardening`) found the issues listed in `propo
 
 ### D1: Fail-closed global auth
 
-Current behavior: `loadGlobalAuthConfiguration` returns `hasGlobalAuth: false` with no error in several paths, and `checkTwoTierAuth` then falls through to per-server logic. An env var set to `[]` (empty array) parses successfully and yields zero configs, indistinguishable from "not configured" — with no per-server auth this allows unauthenticated access even though the operator believes global auth is active.
+Current behavior: `loadGlobalAuthConfiguration` returns `hasGlobalAuth: false` in several failure paths, and `checkTwoTierAuth` then falls through to per-server logic. An env var set to `[]` (empty array) parses successfully and yields zero configs, indistinguishable from "not configured" — with no per-server auth this allows unauthenticated access even though the operator believes global auth is active.
 
-Decision: treat "global auth configured" as "env var present and non-empty after parse, or KV key present and non-empty". Any load/parse/validate failure while a configured source exists returns 500 (`createConfigInvalidResponse`). Only a genuinely absent source (no env var, no KV key) means global auth is off. The `Env.GLOBAL_AUTH_CONFIGS` presence check moves before JSON parse so `[]` is still "configured" and yields the two-tier required-auth behavior via `checkTwoTierAuth` (empty global configs + configured → per-server auth must pass, and servers with no per-server auth are denied).
+Decision: "global auth configured" means a source exists — `GLOBAL_AUTH_CONFIGS` env var present (including an empty array) or the KV key `global-auth-configs` present. The loader distinguishes three outcomes:
 
-Wait — `checkTwoTierAuth` currently allows access when global auth is configured but has empty configs only if per-server auth passes. That is the correct fail-closed semantics for an empty global array. The fix is narrowly: parse errors, validation errors, and secret-interpolation errors while a source exists must return 500 rather than silently degrading to "no global auth".
+1. **Source absent** (no env var, no KV key): global auth off, per-server logic only.
+2. **Source present, loads and validates cleanly** (empty or not): `hasGlobalAuth: true` with the parsed configs (possibly `[]`). This flag threads into `checkTwoTierAuth`, which keeps its existing required-auth semantics: with global auth configured and zero global configs, only valid per-server auth grants access, and servers without per-server auth are denied.
+3. **Source present but load/parse/validate/interpolation fails**: returns an error result the request pipeline converts to 500. Never degrades to outcome 1 or open access.
+
+The runtime change is narrow: `GlobalAuthResult` carries an explicit configured/absent distinction, and `checkTwoTierAuth` branches on that flag rather than on `configs.length > 0`.
 
 ### D2: Reject legacy auth fields
 
@@ -53,7 +57,7 @@ Backup format: `{ version: 1, exportedAt: ISO string, entries: Record<string, un
 
 ### D8: Spec consolidation
 
-Specs still document legacy auth (`Legacy Single-Header Authentication`, `Authentication Logic Merging`), a duplicated `Authentication Header Security` requirement (appears twice in `authentication/spec.md`), and multi-auth migration behavior removed at runtime. Deltas in `specs/` update `authentication`, `configuration-management`, `header-processing`, and add `build-tooling` for repo/tooling requirements. Docs: `MULTI_AUTH_GUIDE.md` deleted (its still-relevant content folds into README's config section); `SPECS.md` gets a legacy-field rejection note.
+Specs still document legacy auth (`Legacy Single-Header Authentication`, `Authentication Logic Merging`) and reference legacy fields inside `No Authentication Required`, `Secret Interpolation in Authentication`, and `Authentication Header Security`; the same legacy references appear in `header-processing/spec.md`'s exclusion scenarios. Deltas in `specs/` update `authentication`, `configuration-management`, `header-processing`, and add `build-tooling` for repo/tooling requirements. Docs: `MULTI_AUTH_GUIDE.md` deleted (its still-relevant content folds into README's config section); `SPECS.md` gets a legacy-field rejection note; `openspec/project.md` drops its legacy auth references (single-header auth, `auth`/`authHeader` in the Authentication Model section).
 
 ## Risks / Trade-offs
 

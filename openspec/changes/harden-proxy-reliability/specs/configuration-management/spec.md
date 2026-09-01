@@ -20,13 +20,8 @@ The system SHALL ensure all configurations comply with the defined schema for Se
 
 #### Scenario: Legacy auth validation
 - **WHEN** configuration includes legacy `auth` and `authHeader`
-- **THEN** the system SHALL reject the configuration
+- **THEN** the system SHALL reject the configuration as specified by the Legacy Auth Field Rejection requirement in the authentication capability
 - **AND** the validation error SHALL name the legacy fields
-
-#### Scenario: Legacy auth fields rejected
-- **WHEN** configuration includes `auth` or `authHeader`
-- **THEN** the system SHALL reject the configuration
-- **AND** report the legacy fields as unsupported
 
 #### Scenario: Optional field handling
 - **WHEN** configuration includes only required fields

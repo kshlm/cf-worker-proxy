@@ -3,11 +3,11 @@
 ## 1. Runtime: fail-closed auth and legacy rejection
 
 - [ ] 1.1 Write failing test: `GLOBAL_AUTH_CONFIGS` set to invalid JSON returns 500 and never falls back to per-server or open access (`tests/global-auth.test.ts`)
-- [ ] 1.2 Write failing test: `GLOBAL_AUTH_CONFIGS` = `[]` (empty array) is treated as configured; server without per-server auth gets 401, not open access
+- [ ] 1.2 Write failing test: `GLOBAL_AUTH_CONFIGS` = `[]` (empty array) counts as configured — the loader reports `hasGlobalAuth: true`; server without per-server auth gets 401, not open access
 - [ ] 1.3 Write failing test: global auth failing secret interpolation returns 500 instead of degrading to no-global-auth
-- [ ] 1.4 Fix `src/utils/global-auth.ts` so any load/parse/validate/interpolation failure with a configured source returns an error result consumed as 500 by `src/request-processor.ts` (make tests from 1.1–1.3 pass)
-- [ ] 1.5 Write failing test: server config containing `auth` or `authHeader` is rejected with error naming the fields (`tests/index.test.ts`)
-- [ ] 1.6 Add legacy-field rejection to `validateProcessedConfig` in `src/config-validator.ts` (make 1.5 pass)
+- [ ] 1.4 Fix `src/utils/global-auth.ts` to distinguish source-absent from source-present outcomes and thread `hasGlobalAuth` into `checkTwoTierAuth` (branch on the configured flag, not `configs.length`); load/parse/validate/interpolation failures with a present source return an error result consumed as 500 by `src/request-processor.ts` (make tests from 1.1–1.3 pass)
+- [ ] 1.5 Write failing test: server config containing `auth` or `authHeader` is rejected with a 500 error naming the fields and directing to `authConfigs` (`tests/index.test.ts`)
+- [ ] 1.6 Add legacy-field rejection to `validateProcessedConfig` in `src/config-validator.ts` (make 1.5 pass); cover both the KV-config path and the config-script path with the same check — no separate rejection logic
 
 ## 2. Runtime: redirect/header safety and dead code
 
@@ -35,7 +35,7 @@
 - [ ] 5.1 Delete `package-lock.json`; confirm `bun.lock` is the only lockfile
 - [ ] 5.2 Delete `.eslintrc.cjs`; extend `eslint.config.js` to cover `src/`, `tests/`, `scripts/`
 - [ ] 5.3 Rewrite `.prettierrc` as valid JSON (singleQuote, trailingComma all, printWidth 100, tabWidth 2, semi false); add `.prettierignore` (node_modules, package-lock.json, bun.lock, openspec/)
-- [ ] 5.4 Extend `tsconfig.json` include (or add `tsconfig.check.json`) so `bun run typecheck` covers `src` and `tests`
+- [ ] 5.4 Extend `tsconfig.json` include (or add `tsconfig.check.json`) so `bun run typecheck` covers `src`, `tests`, and `scripts`
 - [ ] 5.5 Add scripts to `package.json`: `format:check`, `check` (typecheck && lint && format:check && test); fix `lint` to drop stale `--ext` usage with flat config
 - [ ] 5.6 Add coverage thresholds (80% lines/statements on `src/`) to `vitest.config.ts`; run `bun run test:coverage` and tune exclusions only if a file is untestable-by-design (document exclusion reason inline)
 
@@ -50,6 +50,7 @@
 - [ ] 7.2 Update `README.md`: Bun-only setup, legacy field rejection and migration note, `bun run check`, CI badge/reference
 - [ ] 7.3 Update `SPECS.md`: remove legacy auth references, note rejection behavior and `redirect: manual`
 - [ ] 7.4 Update `CLAUDE.md`/`CRUSH.md`/`AGENTS.md` if they reference npm, `.eslintrc.cjs`, or legacy auth
+- [ ] 7.5 Update `openspec/project.md`: remove legacy auth references (single-header auth, `auth`/`authHeader`) from the Authentication Model and Flexible Authentication sections
 
 ## 8. Verification
 

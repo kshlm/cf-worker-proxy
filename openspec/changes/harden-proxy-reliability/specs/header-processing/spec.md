@@ -34,6 +34,3 @@ The system SHALL exclude authentication headers from forwarded requests to preve
 - **THEN** the forwarded request SHALL be created with `redirect: 'manual'`
 - **AND** the worker SHALL NOT automatically re-issue the request to the redirect target with the same headers
 
-## REMOVED Requirements
-
-(none — header-processing keeps all existing requirements; the legacy-only exclusion scenarios are superseded by the MODIFIED requirement above which drops legacy `authHeader` scenarios)
