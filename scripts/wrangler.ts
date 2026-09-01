@@ -55,18 +55,37 @@ export function parseKeyList(output: string): { name: string }[] {
   if (!Array.isArray(parsed)) {
     throw new Error('KV key list returned malformed output: expected an array');
   }
-  return parsed.filter(
-    (entry): entry is { name: string } =>
-      entry !== null && typeof entry === 'object' && typeof (entry as { name?: unknown }).name === 'string'
-  );
+  for (const [index, entry] of parsed.entries()) {
+    if (entry === null || typeof entry !== 'object' || typeof (entry as { name?: unknown }).name !== 'string') {
+      throw new Error(`KV key list returned malformed entry at index ${index}`);
+    }
+  }
+  return parsed as { name: string }[];
 }
+
+export { isValidHeaderName } from '../src/utils/auth-helpers';
 
 /**
  * Writes data to a uniquely named temp file created with 0600 permissions
  * and returns its path. Caller is responsible for cleanup.
  */
 export function writeTempFile(prefix: string, data: string): string {
-  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), prefix)), 'value.json');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  const file = path.join(dir, 'value.json');
   fs.writeFileSync(file, data, { mode: 0o600 });
   return file;
+}
+
+/**
+ * Removes a temp file and its parent temp directory (created by
+ * writeTempFile). Safe to call with null; never throws.
+ */
+export function cleanupTempFile(file: string | null): void {
+  if (!file) return;
+  try {
+    fs.unlinkSync(file);
+    fs.rmdirSync(path.dirname(file));
+  } catch {
+    // best effort cleanup
+  }
 }

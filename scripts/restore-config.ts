@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import * as readline from 'readline';
-import { runWrangler, parseKeyList, writeTempFile, isValidRouteId, GLOBAL_AUTH_KV_KEY } from './wrangler';
+import { runWrangler, parseKeyList, writeTempFile, cleanupTempFile, isValidRouteId, GLOBAL_AUTH_KV_KEY } from './wrangler';
 import { validateProcessedConfig } from '../src/config-validator';
 import { ServerConfig } from '../src/types';
 
@@ -92,7 +92,7 @@ function loadBackup(raw: string): LoadedBackup {
  */
 export async function restore(backupFile?: string, opts: RestoreOptions = {}): Promise<RestoreResult> {
   if (!backupFile) {
-    throw new Error('Usage: bun run restore-config <backup-file.json> [--dry-run] [--yes] [--replace]');
+    throw new Error('Usage: bun run restore-config <backup-file.json> [--dry-run] [--yes] [--replace [--confirm-prune]]');
   }
   if (!fs.existsSync(backupFile)) {
     throw new Error(`Backup file not found: ${backupFile}`);
@@ -126,16 +126,41 @@ export async function restore(backupFile?: string, opts: RestoreOptions = {}): P
       }
       continue;
     }
-    // Route configs: full runtime validation against the stored (raw) value.
-    // Raw string KV values are pass-through (they were stored raw).
+    // Route configs: full runtime validation against the stored value.
+    // String-valued entries are parsed first so a raw KV string round-trips
+    // through the same validation as object entries.
+    let configValue: unknown = value;
     if (typeof value === 'string') {
+      // A string that parses as JSON is treated as a serialized config and
+      // must pass the shared validator; non-JSON strings are raw KV values
+      // preserved verbatim.
+      let parsedString: unknown = null;
+      let isJson = false;
+      try {
+        parsedString = JSON.parse(value);
+        isJson = true;
+      } catch {
+        isJson = false;
+      }
+      if (isJson) {
+        if (parsedString === null || typeof parsedString !== 'object' || Array.isArray(parsedString)) {
+          validationErrors.push({ key, error: 'JSON string entry must be a server configuration object' });
+          continue;
+        }
+        const parsedValidation = validateProcessedConfig(parsedString as ServerConfig);
+        if (!parsedValidation.isValid) {
+          validationErrors.push({ key, error: parsedValidation.error?.message || 'invalid configuration' });
+        }
+        continue;
+      }
+      // non-JSON raw string: preserved verbatim, nothing to validate
       continue;
     }
-    if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    if (configValue === null || typeof configValue !== 'object' || Array.isArray(configValue)) {
       validationErrors.push({ key, error: 'entry must be a server configuration object' });
       continue;
     }
-    const validation = validateProcessedConfig(value as ServerConfig);
+    const validation = validateProcessedConfig(configValue as ServerConfig);
     if (!validation.isValid) {
       validationErrors.push({ key, error: validation.error?.message || 'invalid configuration' });
     }
@@ -199,13 +224,7 @@ export async function restore(backupFile?: string, opts: RestoreOptions = {}): P
       console.log('Failed.');
       failed.push({ key, error: error instanceof Error ? error.message : String(error) });
     } finally {
-      if (tempFile) {
-        try {
-          fs.unlinkSync(tempFile);
-        } catch {
-          // best effort cleanup
-        }
-      }
+      cleanupTempFile(tempFile);
     }
   }
 
@@ -216,6 +235,9 @@ export async function restore(backupFile?: string, opts: RestoreOptions = {}): P
     const remoteKeys = parseKeyList(listOutput).map((k) => k.name);
     for (const key of remoteKeys) {
       if (keys.includes(key)) continue;
+      // The reserved global auth key is never pruned: it holds auth config,
+      // not a route, and it is not part of the backup's route entries.
+      if (key === GLOBAL_AUTH_KV_KEY) continue;
       process.stdout.write(`Pruning ${key}... `);
       try {
         runWrangler(['kv', 'key', 'delete', key, '--binding=PROXY_SERVERS']);

@@ -5,7 +5,7 @@ import * as path from 'path'
 import * as os from 'os'
 import { ServerConfig, AuthConfig } from '../src/types'
 import { validateProcessedConfig } from '../src/config-validator'
-import { runWrangler as runWranglerArgs, writeTempFile, isValidRouteId, parseKeyList, GLOBAL_AUTH_KV_KEY } from './wrangler'
+import { runWrangler as runWranglerArgs, writeTempFile, isValidRouteId, parseKeyList, isValidHeaderName, GLOBAL_AUTH_KV_KEY } from './wrangler'
 
 let currentConfig: Record<string, ServerConfig> = {}
 
@@ -119,7 +119,7 @@ async function collectAuthConfigs(): Promise<AuthConfig[]> {
     }
 
     // Validate header name format
-    if (!/^[a-zA-Z0-9!#$%&'*+.^_`|~-]+$/.test(headerName)) {
+    if (!isValidHeaderName(headerName)) {
       console.log('Invalid header name format. Please use valid HTTP header characters.')
       continue
     }
@@ -136,7 +136,6 @@ async function collectAuthConfigs(): Promise<AuthConfig[]> {
     if (authChoice === '2') {
       const token = crypto.randomBytes(32).toString('hex')
       const secretName = `${headerName.toUpperCase().replace(/[^A-Z0-9]/g, '_')}_TOKEN`
-      console.log(`Generated auth token: ${token}`)
       const confirm = (await askQuestion('Save this token as a secret? (y/n): ')).toLowerCase().trim()
       if (confirm === 'y') {
         console.log(`Saving auth token as secret ${secretName}...`)
@@ -159,7 +158,6 @@ async function collectAuthConfigs(): Promise<AuthConfig[]> {
       } else {
         const token = crypto.randomBytes(32).toString('hex')
         const secretName = `${headerName.toUpperCase().replace(/[^A-Z0-9]/g, '_')}_TOKEN`
-        console.log(`Generated auth token: ${token}`)
         const confirm = (await askQuestion('Save this token as a secret? (y/n): ')).toLowerCase().trim()
         if (confirm === 'y') {
           console.log(`Saving auth token as secret ${secretName}...`)
@@ -242,7 +240,7 @@ async function editAuthConfigs(currentAuthConfigs?: AuthConfig[]): Promise<AuthC
 
       const newHeader = (await askQuestion(`Header name (${config.header}): `)).trim()
       if (newHeader && newHeader !== config.header) {
-        if (!/^[a-zA-Z0-9!#$%&'*+.^_`|~-]+$/.test(newHeader)) {
+        if (!isValidHeaderName(newHeader)) {
           console.log('Invalid header name format. Keeping original.')
         } else if (authConfigs.some((c, i) => i !== index - 1 && c.header.toLowerCase() === newHeader.toLowerCase())) {
           console.log(`Header "${newHeader}" already exists. Keeping original.`)
@@ -280,55 +278,6 @@ async function editAuthConfigs(currentAuthConfigs?: AuthConfig[]): Promise<AuthC
   }
 
   return authConfigs
-}
-
-/**
- * Validates authConfigs array structure
- */
-function validateAuthConfigs(authConfigs?: AuthConfig[]): { isValid: boolean; error?: string } {
-  if (!authConfigs) {
-    return { isValid: true } // No auth configs is valid
-  }
-
-  if (!Array.isArray(authConfigs)) {
-    return { isValid: false, error: 'authConfigs must be an array' }
-  }
-
-  // Check for duplicate header names (case-insensitive)
-  const headerNames = authConfigs.map(config => config.header.toLowerCase())
-  const uniqueHeaders = new Set(headerNames)
-  if (headerNames.length !== uniqueHeaders.size) {
-    return { isValid: false, error: 'Duplicate header names found in authConfigs (header names must be unique)' }
-  }
-
-  // Validate each auth config
-  for (const [index, authConfig] of authConfigs.entries()) {
-    if (!authConfig.header || authConfig.header.trim() === '') {
-      return { isValid: false, error: `AuthConfig[${index}].header is required but empty` }
-    }
-
-    if (!/^[a-zA-Z0-9!#$%&'*+.^_`|~-]+$/.test(authConfig.header)) {
-      return { isValid: false, error: `AuthConfig[${index}].header "${authConfig.header}" contains invalid characters` }
-    }
-
-    if (!authConfig.value || authConfig.value.trim() === '') {
-      return { isValid: false, error: `AuthConfig[${index}].value for header "${authConfig.header}" is required but empty` }
-    }
-
-    // Basic header value validation (no control characters except tab and space)
-    if (/[\x00-\x08\x0A-\x1F\x7F]/u.test(authConfig.value)) {
-      return { isValid: false, error: `AuthConfig[${index}].value for header "${authConfig.header}" contains invalid control characters` }
-    }
-  }
-
-  return { isValid: true }
-}
-
-/**
- * Returns config as-is (no cleanup needed since legacy auth fields are removed)
- */
-function cleanupConfigForSaving(config: ServerConfig): ServerConfig {
-  return { ...config }
 }
 
 // Export functions for testing
@@ -390,8 +339,13 @@ async function addEntry() {
   if (authConfigs) newConfig.authConfigs = authConfigs
   if (Object.keys(headers).length > 0) newConfig.headers = headers
 
+  try {
+    saveSingleConfig(id, newConfig)
+  } catch (e) {
+    console.error(`Failed to add ${id}:`, e instanceof Error ? e.message : e)
+    return
+  }
   currentConfig[id] = newConfig
-  saveSingleConfig(id, newConfig)
   console.log(`Added entry for ${id}.`)
 }
 
@@ -461,8 +415,13 @@ async function modifyEntry() {
   if (authConfigs) updatedConfig.authConfigs = authConfigs
   if (Object.keys(newHeaders).length > 0) updatedConfig.headers = newHeaders
 
+  try {
+    saveSingleConfig(id, updatedConfig)
+  } catch (e) {
+    console.error(`Failed to modify ${id}:`, e instanceof Error ? e.message : e)
+    return
+  }
   currentConfig[id] = updatedConfig
-  saveSingleConfig(id, updatedConfig)
   console.log(`Modified entry for ${id}.`)
 }
 
@@ -482,8 +441,13 @@ async function deleteEntry() {
 
   const confirm = (await askQuestion(`Confirm delete ${id}? (y/n): `)).toLowerCase().trim()
   if (confirm === 'y') {
+    try {
+      deleteSingleConfig(id)
+    } catch (e) {
+      console.error(`Failed to delete ${id}:`, e instanceof Error ? e.message : e)
+      return
+    }
     delete currentConfig[id]
-    deleteSingleConfig(id)
     console.log(`Deleted entry for ${id}.`)
   } else {
     console.log('Delete cancelled.')

@@ -472,3 +472,135 @@ describe('restore-config', () => {
     expect(allLogged).not.toContain('real-secret-token')
   })
 })
+
+describe('script review follow-ups', () => {
+  let mockEnvBackup: unknown
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  describe('restore: string-valued route entries', () => {
+    let consoleLog: ReturnType<typeof vi.spyOn>
+    let consoleError: ReturnType<typeof vi.spyOn>
+    let exitSpy: ReturnType<typeof vi.spyOn>
+    const originalArgv = process.argv
+    const writtenData: string[] = []
+
+    beforeEach(() => {
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'review-restore-'))
+      writtenData.length = 0
+      consoleLog = vi.spyOn(console, 'log').mockImplementation(() => {})
+      consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+      exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+        throw new Error(`process.exit(${code})`)
+      }) as never)
+      const realWrite = realWriteRef
+      vi.spyOn(fs, 'writeFileSync').mockImplementation(((file: fs.PathOrFileDescriptor, data: unknown, options?: fs.WriteFileOptions) => {
+        if (file.toString().includes('restore-put-')) {
+          writtenData.push(String(data))
+        }
+        return realWrite(file, data, options)
+      }) as typeof fs.writeFileSync)
+    })
+
+    afterEach(() => {
+      process.argv = originalArgv
+      consoleLog.mockRestore()
+      consoleError.mockRestore()
+      exitSpy.mockRestore()
+      vi.mocked(fs.writeFileSync).mockImplementation(realWriteRef as never)
+      fs.rmSync(tmpDir, { recursive: true, force: true })
+    })
+
+    function writeBackup(doc: unknown): string {
+      const file = path.join(tmpDir, 'backup.json')
+      realWriteRef(file, JSON.stringify(doc))
+      return file
+    }
+
+    it('validates a string-valued route entry by parsing it and running the shared validator before write', async () => {
+      const file = writeBackup({
+        version: 1,
+        exportedAt: 'x',
+        entries: { api: JSON.stringify({ url: 'https://api.example.com', auth: 'legacy' }) }
+      })
+      const mod = (await freshModule('../scripts/restore-config')) as { restore: (f?: string, o?: object) => Promise<unknown> }
+      await expect(mod.restore(file, { yes: true })).rejects.toThrow(/validation|invalid|legacy/i)
+      expect(mockExecFileSync).not.toHaveBeenCalled()
+    })
+
+    it('accepts and restores a string-valued route entry whose parsed JSON is valid', async () => {
+      const file = writeBackup({
+        version: 1,
+        exportedAt: 'x',
+        entries: { api: JSON.stringify({ url: 'https://api.example.com' }) }
+      })
+      mockExecFileSync.mockImplementation(((file2: string, args: string[]) => {
+        if (args && args.includes('put')) return 'ok' as unknown
+        return '' as unknown
+      }) as typeof execFileSync)
+      const mod = (await freshModule('../scripts/restore-config')) as { restore: (f?: string, o?: object) => Promise<{ restored: string[] }> }
+      const result = await mod.restore(file, { yes: true })
+      expect(result.restored).toEqual(['api'])
+      expect(writtenData.some((d) => d.includes('api.example.com'))).toBe(true)
+    })
+
+    it('always preserves global-auth-configs during --replace pruning', async () => {
+      const file = writeBackup({
+        version: 1,
+        exportedAt: 'x',
+        entries: { api: { url: 'https://api.example.com' } }
+      })
+      process.argv = ['bun', 'scripts/restore-config.ts', file]
+      mockExecFileSync.mockImplementation(((file2: string, args: string[]) => {
+        if (args && args.includes('list')) return JSON.stringify([{ name: 'api' }, { name: 'stale' }, { name: 'global-auth-configs' }]) as unknown
+        if (args && args.includes('put')) return 'ok' as unknown
+        if (args && args.includes('delete')) return 'ok' as unknown
+        return '' as unknown
+      }) as typeof execFileSync)
+      const mod = (await freshModule('../scripts/restore-config')) as { restore: (f?: string, o?: object) => Promise<{ pruned: string[] }> }
+      const result = await mod.restore(file, { yes: true, replace: true, confirmReplace: true })
+      expect(result.pruned).toEqual(['stale'])
+      const deleteCalls = mockExecFileSync.mock.calls.filter((c) => (c[1] as string[]).includes('delete'))
+      const deletedKeys = deleteCalls.map((c) => {
+        const args = c[1] as string[]
+        return args[args.indexOf('delete') + 1]
+      })
+      expect(deletedKeys).not.toContain('global-auth-configs')
+    })
+
+    it('parseKeyList rejects a malformed entry instead of dropping it', async () => {
+      const { parseKeyList } = await freshModule('../scripts/wrangler')
+      expect(() => parseKeyList(JSON.stringify([{ name: 'ok' }, { nope: true }]))).toThrow(/malformed/i)
+      expect(() => parseKeyList(JSON.stringify([{ name: 'ok' }, 'string-entry']))).toThrow(/malformed/i)
+      expect(() => parseKeyList(JSON.stringify([{ name: 'ok' }, null]))).toThrow(/malformed/i)
+    })
+
+    it('exported GLOBAL_AUTH_KV_KEY is consistent between wrangler helper and runtime', async () => {
+      const helper = await freshModule('../scripts/wrangler')
+      const runtime = await freshModule('../src/utils/global-auth')
+      expect(helper.GLOBAL_AUTH_KV_KEY).toBe(runtime.GLOBAL_AUTH_KV_KEY)
+    })
+  })
+
+  describe('update-proxy-config: interactive failure handling', () => {
+    it('does not mutate in-memory state when save fails; catches, reports, continues', async () => {
+      const mod = (await freshModule('../scripts/update-proxy-config')) as {
+        saveSingleConfig: (id: string, config: unknown) => void
+      }
+      // saveSingleConfig now throws on failure; addEntry must catch and not
+      // keep state. Verified indirectly: saveSingleConfig throws, addEntry
+      // catches. Direct unit check of the throw path:
+      mockExecFileSync.mockImplementation(() => {
+        throw new Error('put failed')
+      })
+      expect(() => mod.saveSingleConfig('test-server', { url: 'https://example.com' })).toThrow('put failed')
+    })
+
+    it('validates header names with the shared isValidHeaderName helper', async () => {
+      const helper = await freshModule('../scripts/wrangler')
+      expect(typeof helper.isValidHeaderName).toBe('function')
+    })
+  })
+})

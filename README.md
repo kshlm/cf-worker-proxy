@@ -84,7 +84,8 @@ bun run restore-config backups/proxy-config-backup-XXX.json
 # Restore non-interactively (still prompts for the reserved global-auth-configs key)
 bun run restore-config backups/proxy-config-backup-XXX.json --yes
 
-# Restore and delete remote keys not in the backup (requires strong confirmation)
+# Restore and delete remote keys not in the backup (--confirm-prune is the
+# strong typed confirmation; the reserved global-auth-configs key is never pruned)
 bun run restore-config backups/proxy-config-backup-XXX.json --replace --confirm-prune
 ```
 
