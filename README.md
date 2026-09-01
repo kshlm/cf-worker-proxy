@@ -65,8 +65,37 @@ The script provides:
 - **Interactive setup**: Guided configuration for new proxy servers
 - **Multi-auth support**: Configure multiple authentication headers
 - **Secret generation**: Auto-generate secure tokens and save as Cloudflare secrets
-- **Validation**: Built-in configuration validation
-- **Legacy migration**: Automatic conversion from old auth format to new multi-auth format
+- **Validation**: The same runtime validation the worker applies; invalid configs are rejected before any KV write
+
+### Backup and Restore
+
+Back up the KV configuration to a versioned local file, and restore from one:
+
+```bash
+# Back up (writes backups/proxy-config-backup-<timestamp>.json, mode 0600)
+bun run backup-config
+
+# Preview what a restore would do without writing anything
+bun run restore-config backups/proxy-config-backup-XXX.json --dry-run
+
+# Restore (merge by default; interactive confirmation)
+bun run restore-config backups/proxy-config-backup-XXX.json
+
+# Restore non-interactively (still prompts for the reserved global-auth-configs key)
+bun run restore-config backups/proxy-config-backup-XXX.json --yes
+
+# Restore and delete remote keys not in the backup (requires strong confirmation)
+bun run restore-config backups/proxy-config-backup-XXX.json --replace --confirm-prune
+```
+
+Restore semantics:
+- The entire backup is validated with the runtime validator before the first remote write
+- Values are stored in KV verbatim; backups preserve raw values in a versioned document
+- Failures are reported per key; the process exits nonzero if any key failed
+- The `global-auth-configs` key is reserved and requires typing its name to overwrite
+- Temp files are created with 0600 permissions and cleaned up after each write
+
+Add `backups/` to `.gitignore` — backup files contain configuration values, including secret placeholder names.
 
 ### Secret Management
 

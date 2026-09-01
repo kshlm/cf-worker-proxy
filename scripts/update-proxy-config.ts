@@ -1,126 +1,76 @@
-import { execSync } from 'child_process'
 import { createInterface } from 'readline'
 import * as crypto from 'crypto'
+import * as fs from 'fs'
+import * as path from 'path'
+import * as os from 'os'
 import { ServerConfig, AuthConfig } from '../src/types'
-
+import { validateProcessedConfig } from '../src/config-validator'
+import { runWrangler as runWranglerArgs, writeTempFile, isValidRouteId, parseKeyList, GLOBAL_AUTH_KV_KEY } from './wrangler'
 
 let currentConfig: Record<string, ServerConfig> = {}
+
 import * as fs from 'fs'
 
-/**
- * Returns server config as-is (legacy conversion no longer needed)
- */
-function convertLegacyToMultiAuth(config: ServerConfig): ServerConfig {
-  return config
-}
 import * as path from 'path'
 import * as os from 'os'
 
-function runWrangler(cmd: string): string {
-  try {
-    let output = execSync(cmd, { stdio: 'pipe', encoding: 'utf-8' }).toString().trim()
-    return output
-  } catch (error) {
-    let stdout = '';
-    let stderr = '';
-    if (error instanceof Error) {
-      if (typeof (error as any).stdout === 'string') {
-        stdout = (error as any).stdout.toString().trim();
-      } else if ((error as any).stdout) {
-        stdout = (error as any).stdout.toString().trim();
-      }
-      if ((error as any).stderr) {
-        stderr = (error as any).stderr.toString().trim();
-      }
-    }
-    return `${stdout}\n${stderr}`.trim() || '';
-  }
-}
-
 function loadAllConfigs(): Record<string, ServerConfig> {
-  let config: Record<string, ServerConfig> = {}
-  try {
-    const listOutput = runWrangler(`wrangler kv key list --binding=PROXY_SERVERS --remote -c wrangler.toml`)
-    if (listOutput) {
-      const listData = JSON.parse(listOutput)
-      const keys = Array.isArray(listData) ? listData : [];
-      for (const kvKey of keys) {
-        const keyName = kvKey.name
-        const data = runWrangler(`wrangler kv key get "${keyName}" --binding=PROXY_SERVERS --remote -c wrangler.toml`)
-        if (data) {
-          try {
-            const parsedConfig = JSON.parse(data) as ServerConfig
-            // Convert legacy auth to multi-auth format
-            config[keyName] = convertLegacyToMultiAuth(parsedConfig)
-          } catch (e) {
-            console.log(`Failed to parse config for ${keyName}:`, e)
-          }
-        }
+  const config: Record<string, ServerConfig> = {}
+  const listOutput = runWranglerArgs(['kv', 'key', 'list', '--binding=PROXY_SERVERS'])
+  for (const kvKey of parseKeyList(listOutput)) {
+    // Reserved key is global auth config, not a route
+    if (kvKey.name === GLOBAL_AUTH_KV_KEY) continue
+    const data = runWranglerArgs(['kv', 'key', 'get', kvKey.name, '--binding=PROXY_SERVERS'])
+    if (data) {
+      try {
+        config[kvKey.name] = JSON.parse(data) as ServerConfig
+      } catch (e) {
+        console.log(`Failed to parse config for ${kvKey.name}:`, e)
       }
     }
-  } catch (e) {
-    console.log('Failed to load existing configs:', e)
   }
   return config
 }
 
 function saveSingleConfig(id: string, config: ServerConfig): void {
+  if (!isValidRouteId(id)) {
+    throw new Error(`Invalid route id "${id}"`)
+  }
+  // Full runtime validation: script rejects what the worker would reject
+  const validation = validateProcessedConfig(config)
+  if (!validation.isValid) {
+    throw new Error(`Validation failed for ${id}: ${validation.error?.message}`)
+  }
+
+  const configJson = JSON.stringify(config, null, 2)
+  const tempFile = writeTempFile('proxy-config-', configJson)
   try {
-    // Validate authConfigs if present
-    const validation = validateAuthConfigs(config.authConfigs)
-    if (!validation.isValid) {
-      console.error(`Validation failed for ${id}: ${validation.error}`)
-      return
-    }
-
-    // Clean up config before saving to avoid conflicts
-    const cleanedConfig = cleanupConfigForSaving(config)
-
-    const configJson = JSON.stringify(cleanedConfig, null, 2)
-    const tempDir = os.tmpdir()
-    const tempFile = path.join(tempDir, `proxy-config-${id}-${Date.now()}.json`)
-    fs.writeFileSync(tempFile, configJson)
-
+    runWranglerArgs(['kv', 'key', 'put', id, '--binding=PROXY_SERVERS', '--path', tempFile])
+    console.log(`Saved config for ${id} to KV.`)
+  } finally {
     try {
-      const output = runWrangler(`wrangler kv key put "${id}" --binding=PROXY_SERVERS --path="${tempFile}" --remote`)
-      if (output && output.includes('error')) {
-        console.error(`Save failed for ${id}:`, output)
-      } else {
-        console.log(`Saved config for ${id} to KV.`)
-      }
-    } finally {
-      try {
-        fs.unlinkSync(tempFile)
-      } catch (unlinkErr) {
-        console.warn(`Failed to delete temp file ${tempFile}:`, unlinkErr)
-      }
+      fs.unlinkSync(tempFile)
+    } catch (unlinkErr) {
+      console.warn(`Failed to delete temp file ${tempFile}:`, unlinkErr)
     }
-  } catch (e) {
-    console.error(`Failed to save config for ${id}:`, e)
   }
 }
 
 function deleteSingleConfig(id: string): void {
-  try {
-    const output = runWrangler(`wrangler kv key delete "${id}" --binding=PROXY_SERVERS --remote`)
-    if (output && output.includes('error')) {
-      console.error(`Delete failed for ${id}:`, output)
-    } else {
-      console.log(`Deleted config for ${id} from KV.`)
-    }
-  } catch (e) {
-    console.error(`Failed to delete config for ${id}:`, e)
+  if (!isValidRouteId(id)) {
+    throw new Error(`Invalid route id "${id}"`)
   }
+  runWranglerArgs(['kv', 'key', 'delete', id, '--binding=PROXY_SERVERS'])
+  console.log(`Deleted config for ${id} from KV.`)
 }
 
 function saveSecret(secretName: string, value: string): boolean {
   try {
-    const cmd = `wrangler secret put "${secretName}"`
-    execSync(cmd, { input: `${value}\n`, stdio: 'pipe', encoding: 'utf-8' })
+    runWranglerArgs(['secret', 'put', secretName], { input: `${value}\n` })
     console.log(`Saved secret ${secretName} to Cloudflare.`)
     return true
   } catch (e) {
-    console.error(`Failed to save secret ${secretName}:`, e)
+    console.error(`Failed to save secret ${secretName}:`, e instanceof Error ? e.message : e)
     return false
   }
 }
@@ -382,10 +332,13 @@ function cleanupConfigForSaving(config: ServerConfig): ServerConfig {
 }
 
 // Export functions for testing
-export { runWrangler, loadAllConfigs, saveSingleConfig, deleteSingleConfig, saveSecret, askQuestion, validateAuthConfigs, cleanupConfigForSaving }
+export { loadAllConfigs, saveSingleConfig, deleteSingleConfig, saveSecret, askQuestion, formatAuthConfigs }
 
-currentConfig = loadAllConfigs()
-console.log(`Loaded ${Object.keys(currentConfig).length} existing configurations.`)
+async function bootstrap() {
+  currentConfig = loadAllConfigs()
+  console.log(`Loaded ${Object.keys(currentConfig).length} existing configurations.`)
+  await main()
+}
 
 async function addEntry() {
   const id = (await askQuestion('Enter new proxy ID: ')).trim()
@@ -586,4 +539,9 @@ async function main() {
   rl.close()
 }
 
-main().catch(console.error)
+if (process.argv[1] && process.argv[1].endsWith('update-proxy-config.ts')) {
+  bootstrap().catch((error: unknown) => {
+    console.error('update-proxy-config failed:', error instanceof Error ? error.message : error)
+    process.exit(1)
+  })
+}

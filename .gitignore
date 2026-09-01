@@ -16,3 +16,6 @@ dist
 
 coverage
 .claude
+
+# Config backups (contain configuration values)
+backups/

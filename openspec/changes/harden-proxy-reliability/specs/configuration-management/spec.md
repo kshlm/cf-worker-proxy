@@ -64,6 +64,18 @@ The configuration management scripts SHALL produce deterministic, versioned back
 #### Scenario: Backup document format
 - **WHEN** running the backup script
 - **THEN** the output file SHALL contain a JSON document with `version: 1`, an `exportedAt` ISO timestamp, and an `entries` object mapping KV keys to values
+- **AND** entry values SHALL be the raw KV values preserved verbatim
+
+#### Scenario: Backup file safety
+- **WHEN** running the backup script
+- **THEN** the output SHALL default to a uniquely named file in the gitignored `backups/` directory
+- **AND** the script SHALL refuse to overwrite an existing backup file
+- **AND** the file SHALL be written atomically with 0600 permissions
+
+#### Scenario: Malformed KV list output
+- **WHEN** the KV key list response is not a valid JSON array
+- **THEN** the backup SHALL abort with an error
+- **AND** NOT write a backup file that silently omits keys
 
 #### Scenario: Restore accepts versioned and legacy formats
 - **WHEN** restoring from a backup file
@@ -73,9 +85,20 @@ The configuration management scripts SHALL produce deterministic, versioned back
 
 #### Scenario: Restore validates entries before writing
 - **WHEN** restoring a backup
-- **THEN** each entry SHALL be validated with the shared configuration validator before any KV write
-- **AND** entries failing validation SHALL be reported per key with a non-zero script exit
-- **AND** no invalid entry SHALL be written to KV
+- **THEN** the ENTIRE backup SHALL be validated with the shared configuration validator before the first KV write
+- **AND** a backup with any invalid entry SHALL abort with nothing written
+- **AND** per-key write failures SHALL be reported and produce a non-zero exit without aborting other keys
+
+#### Scenario: Restore confirmation and dry run
+- **WHEN** restoring without `--yes` on a non-TTY or declining the interactive prompt
+- **THEN** the restore SHALL abort before any remote write
+- **AND** `--dry-run` SHALL validate the backup and perform no remote writes
+
+#### Scenario: Merge and replace semantics
+- **WHEN** restoring without `--replace`
+- **THEN** only keys present in the backup SHALL be written (merge)
+- **AND** `--replace` SHALL additionally delete remote keys absent from the backup
+- **AND** `--replace` SHALL require typed strong confirmation before any write
 
 #### Scenario: Deterministic temp files
 - **WHEN** scripts write temporary files for KV operations
@@ -90,4 +113,10 @@ The configuration management scripts SHALL produce deterministic, versioned back
 
 #### Scenario: Wrangler invocation safety
 - **WHEN** scripts invoke `wrangler` with user-controlled values such as KV key names
-- **THEN** arguments SHALL be passed as an argument array without shell string interpolation
+- **THEN** arguments SHALL be passed as an argv array with shell execution disabled
+- **AND** nonzero exits SHALL throw rather than be swallowed
+
+#### Scenario: Reserved key filtering in scripts
+- **WHEN** scripts enumerate KV keys for route configuration
+- **THEN** the reserved `global-auth-configs` key SHALL be excluded from route operations
+- **AND** route ids SHALL be validated against a safe character set

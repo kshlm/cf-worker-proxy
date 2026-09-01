@@ -1,12 +1,15 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { execSync } from 'child_process'
+import { execSync, execFileSync } from 'child_process'
 import { readFileSync } from 'fs'
 import * as crypto from 'crypto'
 import { createInterface } from 'readline'
 
 // Mock the modules
 vi.mock('child_process')
-vi.mock('fs')
+vi.mock('fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('fs')>()
+  return { ...actual, writeFileSync: vi.fn(actual.writeFileSync.bind(actual)) }
+})
 vi.mock('crypto')
 vi.mock('readline')
 vi.mock('../src/types', () => ({
@@ -14,7 +17,8 @@ vi.mock('../src/types', () => ({
 }))
 
 const mockExecSync = vi.mocked(execSync)
-const mockReadFileSync = vi.mocked(readFileSync)
+const mockExecFileSync = vi.mocked(execFileSync)
+
 const mockCrypto = vi.mocked(crypto)
 const mockCreateInterface = vi.mocked(createInterface)
 
@@ -33,15 +37,6 @@ describe('update-proxy-config', () => {
     }
     mockCreateInterface.mockReturnValue(mockRl)
     
-    // Mock wrangler.toml content
-    mockReadFileSync.mockReturnValue(`
-name = "worker-proxy"
-[[kv_namespaces]]
-binding = "PROXY_SERVERS"
-id = "test-kv-namespace-id"
-preview_id = "test-preview-id"
-`)
-
     // Mock crypto.randomBytes
     const mockRandomBytes = {
       toString: vi.fn().mockReturnValue('abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890')
@@ -56,252 +51,178 @@ preview_id = "test-preview-id"
     process.env = originalEnv
   })
 
-  describe('runWrangler', () => {
-    it('should return stdout on successful command', async () => {
-      const { runWrangler } = await import('../scripts/update-proxy-config')
-      
-      mockExecSync.mockReturnValue('success output')
-      
-      const result = runWrangler('wrangler kv list')
-      
-      expect(result).toBe('success output')
-      expect(mockExecSync).toHaveBeenCalledWith('wrangler kv list', {
-        stdio: 'pipe',
-        encoding: 'utf-8'
-      })
-    })
-
-    it('should return stdout from error when command fails', async () => {
-      const { runWrangler } = await import('../scripts/update-proxy-config')
-      
-      const error = new Error('Command failed') as any
-      error.stdout = 'error output'
-      mockExecSync.mockImplementation(() => {
-        throw error
-      })
-      
-      const result = runWrangler('wrangler kv list')
-      
-      expect(result).toBe('error output')
-    })
-
-    it('should return empty string when command fails with no stdout', async () => {
-      const { runWrangler } = await import('../scripts/update-proxy-config')
-      
-      mockExecSync.mockImplementation(() => {
-        throw new Error('Command failed')
-      })
-      
-      const result = runWrangler('wrangler kv list')
-      
-      expect(result).toBe('')
+  describe('runWrangler (delegated to scripts/wrangler)', () => {
+    it('delegates argv-array execution to the shared helper', async () => {
+      const helper = await import('../scripts/wrangler')
+      expect(typeof helper.runWrangler).toBe('function')
+      expect(typeof helper.isValidRouteId).toBe('function')
+      expect(helper.isValidRouteId('global-auth-configs')).toBe(false)
     })
   })
 
   describe('loadAllConfigs', () => {
-    it('should load configs from KV successfully', async () => {
+    it('should load configs from KV successfully, skipping the reserved key', async () => {
       const { loadAllConfigs } = await import('../scripts/update-proxy-config')
-      
-      // Mock wrangler commands
-      mockExecSync.mockImplementation((cmd: string) => {
-        if (cmd.includes('kv key list')) {
-          return JSON.stringify([
-            { name: 'server1' },
-            { name: 'server2' }
-          ])
+
+      mockExecFileSync.mockImplementation(((file: string, args: string[]) => {
+        if (args.includes('list')) {
+          return JSON.stringify([{ name: 'server1' }, { name: 'server2' }, { name: 'global-auth-configs' }]) as unknown
         }
-        if (cmd.includes('kv key get "server1"')) {
-          return JSON.stringify({ url: 'https://example1.com' })
+        if (args.includes('get') && args.includes('server1')) {
+          return JSON.stringify({ url: 'https://example1.com' }) as unknown
         }
-        if (cmd.includes('kv key get "server2"')) {
-          return JSON.stringify({
-            url: 'https://example2.com',
-            authConfigs: [{ header: 'Authorization', value: 'Bearer token' }]
-          })
+        if (args.includes('get') && args.includes('server2')) {
+          return JSON.stringify({ url: 'https://example2.com', authConfigs: [{ header: 'Authorization', value: 'Bearer token' }] }) as unknown
         }
-        return ''
-      })
-      
+        return '' as unknown
+      }) as typeof execFileSync)
+
       const result = loadAllConfigs()
-      
+
       expect(result).toEqual({
         server1: { url: 'https://example1.com' },
         server2: {
           url: 'https://example2.com',
-          authConfigs: [
-            {
-              header: 'Authorization',
-              value: 'Bearer token'
-            }
-          ]
+          authConfigs: [{ header: 'Authorization', value: 'Bearer token' }]
         }
       })
     })
 
     it('should handle empty KV namespace', async () => {
       const { loadAllConfigs } = await import('../scripts/update-proxy-config')
-      
-      mockExecSync.mockReturnValue(JSON.stringify({ result: [] }))
-      mockExecSync.mockReturnValue(JSON.stringify([]))
-      
+      mockExecFileSync.mockReturnValue(JSON.stringify([]) as unknown)
       const result = loadAllConfigs()
-      
       expect(result).toEqual({})
     })
 
-    it('should handle malformed JSON gracefully', async () => {
+    it('should handle malformed per-key JSON gracefully', async () => {
       const { loadAllConfigs } = await import('../scripts/update-proxy-config')
-      
-      mockExecSync.mockImplementation((cmd: string) => {
-        if (cmd.includes('kv key list')) {
-          return JSON.stringify([{ name: 'server1' }])
-        }
-        if (cmd.includes('kv key get "server1"')) {
-          return 'invalid json'
-        }
-        return ''
-      })
-      
+      mockExecFileSync.mockImplementation(((file: string, args: string[]) => {
+        if (args.includes('list')) return JSON.stringify([{ name: 'server1' }]) as unknown
+        if (args.includes('get')) return 'invalid json' as unknown
+        return '' as unknown
+      }) as typeof execFileSync)
       const result = loadAllConfigs()
-      
       expect(result).toEqual({})
     })
 
-    it('should handle list command failure', async () => {
+    it('should reject malformed list output instead of treating it as empty', async () => {
       const { loadAllConfigs } = await import('../scripts/update-proxy-config')
-      
-      mockExecSync.mockImplementation(() => {
-        throw new Error('List failed')
-      })
-      
-      const result = loadAllConfigs()
-      
-      expect(result).toEqual({})
+      mockExecFileSync.mockReturnValue('{"not":"an array"}' as unknown)
+      expect(() => loadAllConfigs()).toThrow(/malformed/i)
     })
   })
 
   describe('saveSingleConfig', () => {
-    it('should save config successfully', async () => {
+    it('should save valid config with argv-array wrangler call', async () => {
       const { saveSingleConfig } = await import('../scripts/update-proxy-config')
       const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
-      
-      mockExecSync.mockReturnValue('success')
-      
+
+      mockExecFileSync.mockReturnValue('success' as unknown)
+
       saveSingleConfig('test-server', { url: 'https://example.com' })
-      
-      expect(mockExecSync).toHaveBeenCalledWith(
-        expect.stringContaining('wrangler kv key put "test-server"'),
-        expect.any(Object)
+
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        'wrangler',
+        expect.arrayContaining(['kv', 'key', 'put', 'test-server', '--path']),
+        expect.objectContaining({ shell: false })
       )
       expect(consoleSpy).toHaveBeenCalledWith('Saved config for test-server to KV.')
-      
+
       consoleSpy.mockRestore()
     })
 
-    it('should handle save failure', async () => {
+    it('should throw on invalid config (legacy field)', async () => {
       const { saveSingleConfig } = await import('../scripts/update-proxy-config')
-      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
-      
-      mockExecSync.mockReturnValue('error: failed to save')
-      
-      saveSingleConfig('test-server', { url: 'https://example.com' })
-      
-      expect(consoleSpy).toHaveBeenCalledWith('Save failed for test-server:', 'error: failed to save')
-      
-      consoleSpy.mockRestore()
+      expect(() =>
+        saveSingleConfig('test-server', { url: 'https://example.com', auth: 'x' } as unknown as Parameters<typeof saveSingleConfig>[1])
+      ).toThrow(/Legacy auth fields/)
+    })
+
+    it('should throw on invalid route id', async () => {
+      const { saveSingleConfig } = await import('../scripts/update-proxy-config')
+      expect(() => saveSingleConfig('bad id', { url: 'https://example.com' })).toThrow(/Invalid route id/)
+    })
+
+    it('should propagate wrangler failures', async () => {
+      const { saveSingleConfig } = await import('../scripts/update-proxy-config')
+      mockExecFileSync.mockImplementation(() => {
+        throw new Error('put failed')
+      })
+      expect(() => saveSingleConfig('test-server', { url: 'https://example.com' })).toThrow('put failed')
     })
   })
 
   describe('deleteSingleConfig', () => {
-    it('should delete config successfully', async () => {
+    it('should delete config with argv-array call', async () => {
       const { deleteSingleConfig } = await import('../scripts/update-proxy-config')
       const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
-      
-      mockExecSync.mockReturnValue('success')
-      
+
+      mockExecFileSync.mockReturnValue('success' as unknown)
+
       deleteSingleConfig('test-server')
-      
-      expect(mockExecSync).toHaveBeenCalledWith(
-        'wrangler kv key delete "test-server" --binding=PROXY_SERVERS --remote',
-        { stdio: 'pipe', encoding: 'utf-8' }
+
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        'wrangler',
+        expect.arrayContaining(['kv', 'key', 'delete', 'test-server']),
+        expect.objectContaining({ shell: false })
       )
       expect(consoleSpy).toHaveBeenCalledWith('Deleted config for test-server from KV.')
-      
+
       consoleSpy.mockRestore()
     })
 
-    it('should handle delete failure', async () => {
+    it('should propagate delete failures', async () => {
       const { deleteSingleConfig } = await import('../scripts/update-proxy-config')
-      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
-      
-      mockExecSync.mockReturnValue('error: failed to delete')
-      
-      deleteSingleConfig('test-server')
-      
-      expect(consoleSpy).toHaveBeenCalledWith('Delete failed for test-server:', 'error: failed to delete')
-      
-      consoleSpy.mockRestore()
+      mockExecFileSync.mockImplementation(() => {
+        throw new Error('delete failed')
+      })
+      expect(() => deleteSingleConfig('test-server')).toThrow('delete failed')
     })
   })
 
   describe('saveSecret', () => {
-    it('should save secret successfully', async () => {
+    it('should save secret successfully without logging the value', async () => {
       const { saveSecret } = await import('../scripts/update-proxy-config')
       const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
-      
-      mockExecSync.mockReturnValue('success')
-      
+
+      mockExecFileSync.mockReturnValue('success' as unknown)
+
       const result = saveSecret('TEST_SECRET', 'secret-value')
-      
+
       expect(result).toBe(true)
-      expect(mockExecSync).toHaveBeenCalledWith(
-        'wrangler secret put "TEST_SECRET"',
-        expect.objectContaining({
-          input: 'secret-value\n'
-        })
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        'wrangler',
+        expect.arrayContaining(['secret', 'put', 'TEST_SECRET']),
+        expect.objectContaining({ input: 'secret-value\n', shell: false })
       )
-      expect(consoleSpy).toHaveBeenCalledWith('Saved secret TEST_SECRET to Cloudflare.')
-      
+      const logged = consoleSpy.mock.calls.map((c) => c.join(' ')).join('\n')
+      expect(logged).not.toContain('secret-value')
       consoleSpy.mockRestore()
     })
 
-    it('should handle secret save failure', async () => {
+    it('should return false on failure', async () => {
       const { saveSecret } = await import('../scripts/update-proxy-config')
       const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
-      
-      mockExecSync.mockImplementation(() => {
+
+      mockExecFileSync.mockImplementation(() => {
         throw new Error('Secret save failed')
       })
-      
+
       const result = saveSecret('TEST_SECRET', 'secret-value')
-      
+
       expect(result).toBe(false)
-      expect(consoleSpy).toHaveBeenCalledWith('Failed to save secret TEST_SECRET:', expect.any(Error))
-      
       consoleSpy.mockRestore()
     })
   })
 
   describe('integration scenarios', () => {
-    it('should handle wrangler.toml without KV namespace ID', async () => {
-      mockReadFileSync.mockReturnValue(`
-name = "worker-proxy"
-[[kv_namespaces]]
-binding = "PROXY_SERVERS"
-`)
-      
-      const { loadAllConfigs } = await import('../scripts/update-proxy-config')
-      
-      // Should use default namespace ID
-      expect(() => loadAllConfigs()).not.toThrow()
-    })
-
     it('should handle special characters in config JSON', async () => {
       const { saveSingleConfig } = await import('../scripts/update-proxy-config')
       const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
-      
-      mockExecSync.mockReturnValue('success')
-      
+
+      mockExecFileSync.mockReturnValue('success' as unknown)
+
       const configWithSpecialChars = {
         url: 'https://example.com',
         headers: {
@@ -309,14 +230,15 @@ binding = "PROXY_SERVERS"
           'X-Data': 'value with spaces and $pecial'
         }
       }
-      
+
       saveSingleConfig('test-server', configWithSpecialChars)
-      
-      expect(mockExecSync).toHaveBeenCalledWith(
-        expect.stringContaining('--remote'),
-        expect.any(Object)
+
+      expect(mockExecFileSync).toHaveBeenCalledWith(
+        'wrangler',
+        expect.anything(),
+        expect.objectContaining({ shell: false })
       )
-      
+
       consoleSpy.mockRestore()
     })
   })
