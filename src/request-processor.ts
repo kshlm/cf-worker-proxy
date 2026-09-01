@@ -3,11 +3,11 @@ import { processServerConfig } from './secret-interpolation';
 import { validateProcessedConfig } from './config-validator';
 import { processHeadersForProxy } from './header-processor';
 import { mergeAuthConfigs } from './utils/auth-helpers';
-import { loadGlobalAuthConfiguration, checkGlobalAuth } from './utils/global-auth';
+import { loadGlobalAuthConfiguration, checkGlobalAuth, GLOBAL_AUTH_KV_KEY } from './utils/global-auth';
+import { ERROR_MESSAGES } from './constants';
 import {
   createInvalidRouteResponse,
   createServerNotFoundResponse,
-  createServiceUnavailableResponse,
   createConfigInvalidResponse,
   createUnauthorizedResponse,
   createBackendUnavailableResponse,
@@ -24,28 +24,34 @@ function getServerKey(pathname: string): string | null {
 }
 
 /**
- * Builds the backend URL by combining base URL with remaining path and query parameters.
+ * Builds the backend URL by combining base URL with remaining path and query
+ * parameters. Uses the URL API so the composition cannot produce double
+ * slashes, dropped root paths, or malformed joins.
  */
 function buildBackendUrl(baseUrl: string, originalUrl: string, serverKey: string): string {
   const url = new URL(originalUrl)
-  const pathname = url.pathname
 
   const serverKeyWithSlash = `/${serverKey}`
-  const remainingPath = pathname.startsWith(serverKeyWithSlash)
-    ? pathname.slice(serverKeyWithSlash.length)
-    : pathname
+  const remainingPath = url.pathname.startsWith(serverKeyWithSlash)
+    ? url.pathname.slice(serverKeyWithSlash.length)
+    : url.pathname
 
-  const cleanBaseUrl = baseUrl.replace(/\/$/, '')
-  const cleanRemainingPath = remainingPath.startsWith('/') ? remainingPath : `/${remainingPath}`
+  const base = new URL(baseUrl)
+  const basePath = base.pathname.replace(/\/+$/, '')
+  const suffix = remainingPath.replace(/^\/+/, '')
 
-  return `${cleanBaseUrl}${cleanRemainingPath}${url.search}`
+  base.pathname = suffix === '' ? `${basePath}/` : `${basePath}/${suffix}`
+  base.search = url.search
+
+  return base.toString()
 }
 
 /**
- * Checks if the incoming request has valid authentication using "any one match" logic.
+ * Checks the incoming request against auth configs using "any one match"
+ * logic. An empty config list means no authentication requirement, so access
+ * is allowed; callers must not pass empty configs when auth is required.
  */
 export function checkAuth(request: Request, authConfigs: AuthConfig[]): boolean {
-  // Allow access if no headers have been configured
   if (authConfigs.length === 0) {
     return true
   }
@@ -94,6 +100,14 @@ async function loadServerConfig(
   serverKey: string,
   env: Env
 ): Promise<KVOperationResult<ServerConfig>> {
+  // The global auth KV key is reserved; it must never act as a route config.
+  if (serverKey === GLOBAL_AUTH_KV_KEY) {
+    return {
+      success: false,
+      error: `Server key "${serverKey}" is reserved and cannot be used as a route.`
+    };
+  }
+
   try {
     const serverData = await env.PROXY_SERVERS.get(serverKey, { type: 'json' });
     const config = serverData as ServerConfig;
@@ -127,36 +141,29 @@ async function loadServerConfig(
  */
 export function checkTwoTierAuth(
   request: Request,
+  globalAuthConfigured: boolean,
   globalAuthConfigs: AuthConfig[],
   perServerAuthConfigs: AuthConfig[]
 ): { authenticated: boolean; usedGlobalAuth: boolean } {
-  const globalAuthConfigured = globalAuthConfigs.length > 0;
-
-  // Check global authentication only if configured
+  // Global auth is configured when a source exists (env or KV), even with an
+  // empty config array. Configured state is threaded in by the caller so an
+  // empty array can never silently disable authentication.
   if (globalAuthConfigured) {
-    const globalAuthResult = checkGlobalAuth(request, globalAuthConfigs);
-    if (globalAuthResult) {
+    if (checkGlobalAuth(request, globalAuthConfigs)) {
       return { authenticated: true, usedGlobalAuth: true };
     }
-    // Global auth is configured but failed - continue to per-server auth
-  }
-
-  // Check per-server auth
-  // Important: If global auth is configured and failed, we should not allow access
-  // just because per-server auth is empty. Only allow per-server auth if it's actually configured.
-  if (!globalAuthConfigured && perServerAuthConfigs.length === 0) {
-    // No global auth configured and no per-server auth configured - allow access
+    // Global auth failed - per-server auth may still grant access, but an
+    // empty per-server config no longer means open access below.
+  } else if (perServerAuthConfigs.length === 0) {
+    // No global auth and no per-server auth configured - allow access
     return { authenticated: true, usedGlobalAuth: false };
   }
 
-  if (perServerAuthConfigs.length > 0) {
-    const perServerAuthResult = checkAuth(request, perServerAuthConfigs);
-    if (perServerAuthResult) {
-      return { authenticated: true, usedGlobalAuth: false };
-    }
+  if (perServerAuthConfigs.length > 0 && checkAuth(request, perServerAuthConfigs)) {
+    return { authenticated: true, usedGlobalAuth: false };
   }
 
-  // Neither global nor per-server auth succeeded and auth is required
+  // Auth is required and neither tier succeeded
   return { authenticated: false, usedGlobalAuth: false };
 }
 
@@ -171,19 +178,18 @@ export async function processRequest(request: Request, env: Env): Promise<Respon
       return createInvalidRouteResponse();
     }
 
-    // Load global auth configuration
+    // Load global auth configuration. Fail closed on any error with a
+    // present source; only a genuinely absent source disables global auth.
+    let globalAuthConfigured = false;
     let globalAuthConfigs: AuthConfig[] = [];
-    try {
-      const globalAuthResult = await loadGlobalAuthConfiguration(env);
-      if (globalAuthResult.error) {
-        console.error(`Global auth configuration failed: ${globalAuthResult.error}`);
-        return createConfigInvalidResponse(globalAuthResult.error);
-      }
+    const globalAuthResult = await loadGlobalAuthConfiguration(env);
+    if (globalAuthResult.state === 'error') {
+      console.error(`Global auth configuration failed: ${globalAuthResult.error}`);
+      return createConfigInvalidResponse(ERROR_MESSAGES.CONFIG_INVALID_REVIEW);
+    }
+    if (globalAuthResult.state === 'configured') {
+      globalAuthConfigured = true;
       globalAuthConfigs = globalAuthResult.configs;
-    } catch (error) {
-      console.error(`Global auth loading failed: ${error}`);
-      const errorMessage = error instanceof Error ? error.message : 'Global auth configuration error';
-      return createConfigInvalidResponse(`Global auth configuration failed: ${errorMessage}`);
     }
 
     // Load server configuration
@@ -194,7 +200,8 @@ export async function processRequest(request: Request, env: Env): Promise<Respon
       if (configResult.error?.includes('No configuration found')) {
         return createServerNotFoundResponse();
       }
-      return createServiceUnavailableResponse();
+      console.error(`Config load failed: ${configResult.error}`);
+      return createInvalidRouteResponse();
     }
 
     // Process configuration with secret interpolation
@@ -220,7 +227,7 @@ export async function processRequest(request: Request, env: Env): Promise<Respon
 
     // Check authentication using two-tier flow
     const mergedAuthConfigs = mergeAuthConfigs(processedConfig);
-    const authResult = checkTwoTierAuth(request, globalAuthConfigs, mergedAuthConfigs);
+    const authResult = checkTwoTierAuth(request, globalAuthConfigured, globalAuthConfigs, mergedAuthConfigs);
 
     if (!authResult.authenticated) {
       const authHeaders = [...globalAuthConfigs, ...mergedAuthConfigs].map(config => config.header).join(', ');
@@ -247,7 +254,9 @@ export async function processRequest(request: Request, env: Env): Promise<Respon
       method: request.method,
       headers: processedHeaders,
       body: request.body,
-      redirect: request.redirect,
+      // Manual redirects prevent 3xx responses from causing the worker to
+      // replay configured credentials to a different origin.
+      redirect: 'manual',
       duplex: 'half'
     } as RequestInit);
 

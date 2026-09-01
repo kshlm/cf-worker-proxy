@@ -1,5 +1,5 @@
 import { ServerConfig, ErrorDetails, AuthConfig } from './types';
-import { isValidHeaderValue } from './utils/auth-helpers';
+import { isValidHeaderValue, isValidHeaderName } from './utils/auth-helpers';
 import { PROTOCOLS } from './constants';
 
 /**
@@ -9,6 +9,12 @@ export interface ValidationResult {
   isValid: boolean;
   error?: ErrorDetails;
 }
+
+/**
+ * Legacy auth fields removed from the runtime. Their presence in a server
+ * config is a rejection, never a silent ignore.
+ */
+const LEGACY_AUTH_FIELDS = ['auth', 'authHeader'] as const;
 
 /**
  * Validates a backend URL to ensure it's properly formatted and secure
@@ -59,19 +65,7 @@ export function validateBackendUrl(url: string): ValidationResult {
  */
 export function validateAuthConfig(authConfig: AuthConfig): ValidationResult {
   // Validate header name
-  if (!authConfig.header || authConfig.header.trim() === '') {
-    return {
-      isValid: false,
-      error: {
-        message: 'Configuration invalid: Auth header name cannot be empty.',
-        status: 500,
-        context: 'AuthConfig.header is required but empty'
-      }
-    };
-  }
-
-  // Check for valid header name format (basic validation)
-  if (!/^[a-zA-Z0-9!#$%&'*+.^_`|~-]+$/.test(authConfig.header)) {
+  if (!isValidHeaderName(authConfig.header)) {
     return {
       isValid: false,
       error: {
@@ -129,8 +123,22 @@ export function validateAuthConfigs(authConfigs?: AuthConfig[]): ValidationResul
     };
   }
 
-  // Validate each auth config
+  // Validate each auth config, rejecting duplicate header names (case-insensitive)
+  const seenHeaders = new Set<string>();
   for (const [index, authConfig] of authConfigs.entries()) {
+    const headerKey = authConfig.header.toLowerCase();
+    if (seenHeaders.has(headerKey)) {
+      return {
+        isValid: false,
+        error: {
+          message: 'Configuration invalid: Duplicate auth header names are not allowed.',
+          status: 500,
+          context: `authConfigs header "${authConfig.header}" appears more than once`
+        }
+      };
+    }
+    seenHeaders.add(headerKey);
+
     const validation = validateAuthConfig(authConfig);
     if (!validation.isValid) {
       return {
@@ -180,28 +188,27 @@ export function validateHeaders(headers?: Record<string, string>): ValidationRes
     };
   }
 
-  // Validate each header
+  // Validate each header: names must be valid HTTP tokens, values must be
+  // strings without control characters. Empty values are allowed.
   for (const [headerName, headerValue] of Object.entries(headers)) {
-    // Validate header name
-    if (typeof headerName !== 'string' || headerName.trim() === '') {
+    if (!isValidHeaderName(headerName)) {
       return {
         isValid: false,
         error: {
-          message: 'Configuration invalid: Header names must be non-empty strings.',
+          message: 'Configuration invalid: Header names must be valid HTTP header tokens.',
           status: 500,
           context: `Invalid header name: "${headerName}"`
         }
       };
     }
 
-    // Validate header value
-    if (typeof headerValue !== 'string') {
+    if (typeof headerValue !== 'string' || !isValidHeaderValue(headerValue)) {
       return {
         isValid: false,
         error: {
-          message: 'Configuration invalid: Header values must be strings.',
+          message: 'Configuration invalid: Header values must be strings without control characters.',
           status: 500,
-          context: `Header "${headerName}" has invalid value type: ${typeof headerValue}`
+          context: `Header "${headerName}" has an invalid value`
         }
       };
     }
@@ -214,6 +221,20 @@ export function validateHeaders(headers?: Record<string, string>): ValidationRes
  * Validates a complete server configuration
  */
 export function validateProcessedConfig(config: ServerConfig): ValidationResult {
+  // Reject removed legacy auth fields fail-closed
+  const record = config as unknown as Record<string, unknown>;
+  const legacyFields = LEGACY_AUTH_FIELDS.filter(field => record[field] !== undefined);
+  if (legacyFields.length > 0) {
+    return {
+      isValid: false,
+      error: {
+        message: 'Configuration invalid: Legacy auth fields are no longer supported.',
+        status: 500,
+        context: `Server config contains unsupported legacy field(s): ${legacyFields.join(', ')}. Use authConfigs instead.`
+      }
+    };
+  }
+
   // Validate URL
   const urlValidation = validateBackendUrl(config.url);
   if (!urlValidation.isValid) {

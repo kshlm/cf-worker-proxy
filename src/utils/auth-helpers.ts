@@ -8,6 +8,23 @@ export function mergeAuthConfigs(serverConfig: ServerConfig): AuthConfig[] {
 }
 
 /**
+ * Header names that must never be forwarded to a downstream service:
+ * Host is derived from the target URL, and hop-by-hop headers apply only
+ * to the current connection, not the proxied hop.
+ */
+export const FORBIDDEN_FORWARD_HEADERS: ReadonlySet<string> = new Set([
+  'host',
+  'connection',
+  'keep-alive',
+  'proxy-authenticate',
+  'proxy-authorization',
+  'te',
+  'trailer',
+  'transfer-encoding',
+  'upgrade'
+]);
+
+/**
  * Validates header value format
  */
 export function isValidHeaderValue(headerValue: string): boolean {
@@ -18,6 +35,17 @@ export function isValidHeaderValue(headerValue: string): boolean {
   // Basic validation - header values should not contain control characters
   // except for tab (0x09) and space (0x20)
   return !/[\x00-\x08\x0A-\x1F\x7F]/u.test(headerValue);
+}
+
+/**
+ * Validates header name format (RFC 7230 token)
+ */
+export function isValidHeaderName(headerName: string): boolean {
+  if (typeof headerName !== 'string' || headerName.trim() === '') {
+    return false;
+  }
+
+  return /^[a-zA-Z0-9!#$%&'*+.^_`|~-]+$/.test(headerName);
 }
 
 /**

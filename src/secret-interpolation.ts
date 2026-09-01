@@ -4,6 +4,8 @@ const SECRET_PATTERN = /\$\{([\w-]+)\}/g;
 
 /**
  * Interpolates secrets into a string using ${SECRET_NAME} pattern.
+ * Only string env values are interpolated; non-string values (e.g. KV
+ * namespace objects leaking into env) are treated as missing secrets.
  */
 export function interpolateSecret(
   value: string,
@@ -11,9 +13,9 @@ export function interpolateSecret(
   isAuth: boolean = false
 ): string {
   return value.replace(SECRET_PATTERN, (match, secretName) => {
-    const secretValue = env[secretName] as string | undefined;
+    const secretValue = env[secretName];
 
-    if (secretValue !== undefined) {
+    if (typeof secretValue === 'string') {
       return secretValue;
     }
 
@@ -31,7 +33,7 @@ export function interpolateSecret(
  * Validates that a string contains secret placeholders
  */
 export function hasSecretPlaceholders(value: string): boolean {
-  return SECRET_PATTERN.test(value);
+  return new RegExp(SECRET_PATTERN.source).test(value);
 }
 
 /**

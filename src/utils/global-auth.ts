@@ -3,157 +3,143 @@ import { validateAuthConfigs } from '../config-validator';
 import { processGlobalAuthConfigs } from '../secret-interpolation';
 
 /**
- * Result of global auth configuration loading
+ * KV key reserved for global auth configuration. It is not a valid
+ * server route key: requests routed to it must never resolve.
  */
+export const GLOBAL_AUTH_KV_KEY = 'global-auth-configs';
+
+/**
+ * Load state of the global auth configuration source:
+ * - absent: no source exists anywhere; global auth is off
+ * - configured: a source exists and parsed/validated cleanly
+ * - error: a source exists but could not be loaded, parsed, or validated
+ */
+export type GlobalAuthState = 'absent' | 'configured' | 'error';
+
 export interface GlobalAuthResult {
+  state: GlobalAuthState
   configs: AuthConfig[]
-  hasGlobalAuth: boolean
   error?: string
 }
 
 /**
- * Parses global auth configuration from a JSON string
+ * Parses a global auth JSON string. Any parse or validation failure is an
+ * error result, never a silent downgrade to "not configured".
  */
 function parseGlobalAuthConfig(configJson: string): GlobalAuthResult {
   try {
     const configs = JSON.parse(configJson) as AuthConfig[];
 
-    // Validate the configuration
     const validation = validateAuthConfigs(configs);
     if (!validation.isValid) {
       return {
+        state: 'error',
         configs: [],
-        hasGlobalAuth: false,
         error: `Global auth configuration invalid: ${validation.error?.message}`
       };
     }
 
     return {
-      configs,
-      hasGlobalAuth: true
+      state: 'configured',
+      configs
     };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return {
+      state: 'error',
       configs: [],
-      hasGlobalAuth: false,
       error: `Failed to parse global auth configuration: ${errorMessage}`
     };
   }
 }
 
 /**
- * Loads global auth configuration from environment variables
+ * Loads global auth configuration from the environment variable.
+ * A present variable — even an empty array — counts as configured.
  */
 export async function loadGlobalAuthFromEnv(env: Env): Promise<GlobalAuthResult> {
   const globalAuthConfig = env.GLOBAL_AUTH_CONFIGS;
 
-  if (!globalAuthConfig) {
-    return {
-      configs: [],
-      hasGlobalAuth: false
-    };
+  if (globalAuthConfig === undefined) {
+    return { state: 'absent', configs: [] };
   }
 
   return parseGlobalAuthConfig(globalAuthConfig);
 }
 
 /**
- * Loads global auth configuration from KV storage (fallback)
+ * Loads global auth configuration from KV storage (fallback when the
+ * environment variable is absent).
  */
 export async function loadGlobalAuthFromKV(env: Env): Promise<GlobalAuthResult> {
   try {
-    const globalAuthConfig = await env.PROXY_SERVERS.get('global-auth-configs');
+    const globalAuthConfig = await env.PROXY_SERVERS.get(GLOBAL_AUTH_KV_KEY);
 
-    if (!globalAuthConfig) {
-      return {
-        configs: [],
-        hasGlobalAuth: false
-      };
-    }
-
-    // Only attempt to parse if it's a string
-    if (typeof globalAuthConfig !== 'string') {
-      return {
-        configs: [],
-        hasGlobalAuth: false
-      };
+    if (globalAuthConfig === null || globalAuthConfig === undefined) {
+      return { state: 'absent', configs: [] };
     }
 
     return parseGlobalAuthConfig(globalAuthConfig);
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return {
+      state: 'error',
       configs: [],
-      hasGlobalAuth: false,
       error: `Failed to load global auth from KV: ${errorMessage}`
     };
   }
 }
 
 /**
- * Loads global auth configuration with fallback logic and secret interpolation
- * First tries environment variables, then falls back to KV storage
+ * Loads global auth configuration with fallback logic and secret
+ * interpolation. Environment variable first, KV storage as fallback.
+ * A present-but-broken source is an error result: the caller must fail
+ * closed rather than treat global auth as unconfigured.
  */
 export async function loadGlobalAuthConfiguration(env: Env): Promise<GlobalAuthResult> {
-  // Try environment variables first
   const envResult = await loadGlobalAuthFromEnv(env);
-  if (envResult.hasGlobalAuth) {
-    // Process secret interpolation
-    try {
-      const processedConfigs = processGlobalAuthConfigs(envResult.configs, env);
-      return {
-        ...envResult,
-        configs: processedConfigs
-      };
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      return {
-        configs: [],
-        hasGlobalAuth: false,
-        error: `Global auth secret interpolation failed: ${errorMessage}`
-      };
-    }
+  if (envResult.state === 'configured') {
+    return interpolateResult(envResult, env);
+  }
+  if (envResult.state === 'error') {
+    return envResult;
   }
 
-  // Fall back to KV storage
   const kvResult = await loadGlobalAuthFromKV(env);
-  if (kvResult.hasGlobalAuth) {
-    // Process secret interpolation
-    try {
-      const processedConfigs = processGlobalAuthConfigs(kvResult.configs, env);
-      return {
-        ...kvResult,
-        configs: processedConfigs
-      };
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      return {
-        configs: [],
-        hasGlobalAuth: false,
-        error: `Global auth secret interpolation failed: ${errorMessage}`
-      };
-    }
+  if (kvResult.state === 'configured') {
+    return interpolateResult(kvResult, env);
   }
-
   return kvResult;
 }
 
+function interpolateResult(result: GlobalAuthResult, env: Env): GlobalAuthResult {
+  try {
+    return {
+      ...result,
+      configs: processGlobalAuthConfigs(result.configs, env)
+    };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    return {
+      state: 'error',
+      configs: [],
+      error: `Global auth secret interpolation failed: ${errorMessage}`
+    };
+  }
+}
+
 /**
- * Checks if the incoming request has valid global authentication
+ * Checks the incoming request against global auth configs using
+ * "any one match" logic. Only called when global auth is configured.
  */
 export function checkGlobalAuth(request: Request, globalAuthConfigs: AuthConfig[]): boolean {
-  // Allow access if no global auth has been configured
   if (globalAuthConfigs.length === 0) {
-    return true;
+    return false;
   }
 
-  // Check if any global auth header matches (any one match is sufficient)
-  const hasValidMatch = globalAuthConfigs.some(config => {
+  return globalAuthConfigs.some(config => {
     const headerValue = request.headers.get(config.header);
     if (!headerValue) return false;
     return headerValue === config.value;
   });
-
-  return hasValidMatch;
 }

@@ -18,7 +18,7 @@ describe('Global Authentication', () => {
     it('should return empty result when no global auth configured', async () => {
       const result = await loadGlobalAuthFromEnv(mockEnv)
       expect(result.configs).toEqual([])
-      expect(result.hasGlobalAuth).toBe(false)
+      expect(result.state).toBe('absent')
       expect(result.error).toBeUndefined()
     })
 
@@ -34,7 +34,7 @@ describe('Global Authentication', () => {
         { header: 'Authorization', value: 'Bearer global-token' },
         { header: 'X-API-Key', value: 'global-secret' }
       ])
-      expect(result.hasGlobalAuth).toBe(true)
+      expect(result.state).toBe('configured')
       expect(result.error).toBeUndefined()
     })
 
@@ -43,7 +43,7 @@ describe('Global Authentication', () => {
 
       const result = await loadGlobalAuthFromEnv(mockEnv)
       expect(result.configs).toEqual([])
-      expect(result.hasGlobalAuth).toBe(false)
+      expect(result.state).toBe('error')
       expect(result.error).toContain('Failed to parse global auth configuration')
     })
 
@@ -56,18 +56,18 @@ describe('Global Authentication', () => {
 
       const result = await loadGlobalAuthFromEnv(mockEnv)
       expect(result.configs).toEqual([])
-      expect(result.hasGlobalAuth).toBe(false)
+      expect(result.state).toBe('error')
       expect(result.error).toContain('Global auth configuration invalid')
     })
   })
 
   describe('loadGlobalAuthFromKV', () => {
     it('should return empty result when no global auth in KV', async () => {
-      vi.mocked(mockEnv.PROXY_SERVERS.get).mockResolvedValue(null)
+      vi.mocked(mockEnv.PROXY_SERVERS.get).mockImplementation(async (key: string) => key === 'global-auth-configs' ? null : null)
 
       const result = await loadGlobalAuthFromKV(mockEnv)
       expect(result.configs).toEqual([])
-      expect(result.hasGlobalAuth).toBe(false)
+      expect(result.state).toBe('absent')
       expect(result.error).toBeUndefined()
     })
 
@@ -81,7 +81,7 @@ describe('Global Authentication', () => {
       expect(result.configs).toEqual([
         { header: 'Authorization', value: 'Bearer kv-token' }
       ])
-      expect(result.hasGlobalAuth).toBe(true)
+      expect(result.state).toBe('configured')
       expect(result.error).toBeUndefined()
     })
 
@@ -90,7 +90,7 @@ describe('Global Authentication', () => {
 
       const result = await loadGlobalAuthFromKV(mockEnv)
       expect(result.configs).toEqual([])
-      expect(result.hasGlobalAuth).toBe(false)
+      expect(result.state).toBe('error')
       expect(result.error).toContain('Failed to load global auth from KV')
     })
   })
@@ -107,7 +107,7 @@ describe('Global Authentication', () => {
       expect(result.configs).toEqual([
         { header: 'Authorization', value: 'Bearer env-token' }
       ])
-      expect(result.hasGlobalAuth).toBe(true)
+      expect(result.state).toBe('configured')
     })
 
     it('should fall back to KV when env variable not set', async () => {
@@ -119,15 +119,15 @@ describe('Global Authentication', () => {
       expect(result.configs).toEqual([
         { header: 'X-API-Key', value: 'kv-secret' }
       ])
-      expect(result.hasGlobalAuth).toBe(true)
+      expect(result.state).toBe('configured')
     })
 
     it('should return empty when neither env nor KV has config', async () => {
-      vi.mocked(mockEnv.PROXY_SERVERS.get).mockResolvedValue(null)
+      vi.mocked(mockEnv.PROXY_SERVERS.get).mockImplementation(async (key: string) => key === 'global-auth-configs' ? null : null)
 
       const result = await loadGlobalAuthConfiguration(mockEnv)
       expect(result.configs).toEqual([])
-      expect(result.hasGlobalAuth).toBe(false)
+      expect(result.state).toBe('absent')
     })
 
     it('should interpolate secrets in global auth config', async () => {
@@ -145,7 +145,7 @@ describe('Global Authentication', () => {
         { header: 'Authorization', value: 'Bearer interpolated-token' },
         { header: 'X-API-Key', value: 'interpolated-key' }
       ])
-      expect(result.hasGlobalAuth).toBe(true)
+      expect(result.state).toBe('configured')
     })
 
     it('should return error for missing secrets in global auth', async () => {
@@ -157,18 +157,18 @@ describe('Global Authentication', () => {
 
       const result = await loadGlobalAuthConfiguration(mockEnv)
       expect(result.configs).toEqual([])
-      expect(result.hasGlobalAuth).toBe(false)
+      expect(result.state).toBe('error')
       expect(result.error).toContain('Global auth secret interpolation failed')
     })
   })
 
   describe('checkGlobalAuth', () => {
-    it('should allow access when no global auth configured', () => {
+    it('should deny when called with empty configs (empty array counts as configured)', () => {
       const request = new Request('https://proxy.example.com/api/test')
       const globalAuthConfigs: AuthConfig[] = []
 
       const result = checkGlobalAuth(request, globalAuthConfigs)
-      expect(result).toBe(true)
+      expect(result).toBe(false)
     })
 
     it('should allow access when request has valid global auth', () => {
@@ -307,7 +307,7 @@ describe('Global Authentication', () => {
       ])
       const serverConfig = {
         url: 'https://api.example.com',
-        auth: 'Bearer server-token'
+        authConfigs: [{ header: 'Authorization', value: 'Bearer server-token' }]
       }
 
       mockEnv.GLOBAL_AUTH_CONFIGS = globalAuthConfig
@@ -335,7 +335,7 @@ describe('Global Authentication', () => {
       const request = new Request('https://proxy.example.com/api/test')
       // No auth headers provided
 
-      const result = checkTwoTierAuth(request, globalAuthConfigs, perServerAuthConfigs)
+      const result = checkTwoTierAuth(request, true, globalAuthConfigs, perServerAuthConfigs)
       expect(result.authenticated).toBe(false)
       expect(result.usedGlobalAuth).toBe(false)
     })
@@ -353,7 +353,7 @@ describe('Global Authentication', () => {
         headers: { 'Authorization': 'Bearer server-token' }
       })
 
-      const result = checkTwoTierAuth(request, globalAuthConfigs, perServerAuthConfigs)
+      const result = checkTwoTierAuth(request, true, globalAuthConfigs, perServerAuthConfigs)
       expect(result.authenticated).toBe(true)
       expect(result.usedGlobalAuth).toBe(false)
     })

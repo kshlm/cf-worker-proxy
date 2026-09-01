@@ -4,7 +4,6 @@
 export const ERROR_MESSAGES = {
   INVALID_ROUTE: "Invalid route: No server configured for this path.",
   SERVER_NOT_FOUND: "Server not found: No configuration available for this route.",
-  SERVICE_UNAVAILABLE: "Service unavailable: Unable to load configuration.",
   CONFIG_INVALID_REVIEW: "Configuration invalid: Server setup requires review.",
   CONFIG_INVALID_URL: "Configuration invalid: Backend URL is malformed or insecure.",
   UNAUTHORIZED: "Unauthorized: Invalid or missing credentials.",
@@ -67,16 +66,6 @@ export function createServerNotFoundResponse(): Response {
 
 /**
  * Creates a 500 response for service unavailable (KV errors)
- */
-export function createServiceUnavailableResponse(): Response {
-  return createErrorResponse(
-    ERROR_MESSAGES.SERVICE_UNAVAILABLE,
-    HTTP_STATUS.INTERNAL_SERVER_ERROR
-  );
-}
-
-/**
- * Creates a 500 response for configuration errors
  */
 export function createConfigInvalidResponse(message: string = ERROR_MESSAGES.CONFIG_INVALID_REVIEW): Response {
   return createErrorResponse(message, HTTP_STATUS.INTERNAL_SERVER_ERROR);

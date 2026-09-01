@@ -43,11 +43,11 @@ The system SHALL support global authentication configuration that applies to all
 - **AND** apply the required-authentication behavior of the two-tier flow
 - **AND** servers without per-server authentication SHALL return 401 Unauthorized
 
-#### Scenario: Global auth absent on all sources
-- **WHEN** environment variable `GLOBAL_AUTH_CONFIGS` is unset
-- **AND** KV key `global-auth-configs` does not exist
-- **THEN** the system SHALL treat global authentication as not configured
-- **AND** proceed with per-server authentication logic only
+#### Scenario: Global auth KV loading failure
+- **WHEN** global auth configuration cannot be loaded from KV
+- **AND** no environment variable source exists
+- **THEN** the system SHALL return 500 Internal Server Error
+- **AND** not bypass authentication
 
 ## REMOVED Requirements
 
@@ -75,7 +75,20 @@ The system SHALL reject server configurations containing the removed legacy fiel
 - **THEN** the system SHALL process it normally
 - **AND** apply no legacy-field checks
 
-## MODIFIED Requirements
+## ADDED Requirements
+
+### Requirement: Reserved Global Auth Key
+The `global-auth-configs` KV key SHALL be reserved for global authentication and SHALL NOT act as a server route.
+
+#### Scenario: Reserved key not routable
+- **WHEN** a request path targets the `global-auth-configs` key
+- **THEN** the system SHALL return 404 Not Found
+- **AND** never use that key's value as a server configuration
+
+#### Scenario: Reserved key still loads as global auth
+- **WHEN** KV key `global-auth-configs` contains a valid global auth configuration
+- **THEN** the system SHALL load it as global authentication
+- **AND** apply it to all route requests
 
 ### Requirement: No Authentication Required
 The system SHALL allow requests without authentication only when neither global nor per-server authentication is configured.

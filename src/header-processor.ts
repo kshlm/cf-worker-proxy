@@ -1,28 +1,15 @@
 import { ServerConfig, AuthConfig } from './types';
-import { mergeAuthConfigs, createHeaderExclusionSet, createHeadersExcluding } from './utils/auth-helpers';
+import {
+  mergeAuthConfigs,
+  createHeaderExclusionSet,
+  createHeadersExcluding,
+  FORBIDDEN_FORWARD_HEADERS
+} from './utils/auth-helpers';
 
 /**
- * Finds a header value case-insensitively from request headers
- */
-export function findHeaderValue(headers: Headers, headerName: string): string | null {
-  return headers.get(headerName) || headers.get(headerName.toLowerCase()) || null;
-}
-
-/**
- * Creates a new Headers object by copying all headers from the original request
- * except the specified authentication header(s)
- */
-export function createHeadersWithoutAuth(
-  originalHeaders: Headers,
-  authConfigs: AuthConfig[]
-): Headers {
-  const excludeHeaders = createHeaderExclusionSet(authConfigs);
-  return createHeadersExcluding(originalHeaders, excludeHeaders);
-}
-
-/**
- * Adds custom headers to the modified headers, but only if they don't already exist
- * in the processed headers (after auth header removal)
+ * Adds configured headers to the modified headers. Configured headers
+ * override client-supplied values so downstream services receive the
+ * credentials/attributes the operator intended.
  */
 export function addCustomHeaders(
   modifiedHeaders: Headers,
@@ -33,12 +20,7 @@ export function addCustomHeaders(
   }
 
   for (const [headerName, headerValue] of Object.entries(customHeaders)) {
-    // Only add the header if it doesn't already exist in the processed headers
-    // This allows custom Authorization headers to be added even if they were
-    // removed from the original request for security
-    if (!modifiedHeaders.has(headerName)) {
-      modifiedHeaders.set(headerName, headerValue);
-    }
+    modifiedHeaders.set(headerName, headerValue);
   }
 }
 
@@ -57,10 +39,12 @@ export function processHeadersForProxy(
   // Combine global and per-server auth configs for header removal
   const allAuthConfigs = [...globalAuthConfigs, ...perServerAuthConfigs];
 
-  // Create headers without authentication headers
-  const processedHeaders = allAuthConfigs.length > 0
-    ? createHeadersWithoutAuth(originalRequest.headers, allAuthConfigs)
-    : createHeadersWithoutAuth(originalRequest.headers, []);
+  // Create headers without authentication headers, Host, and hop-by-hop headers
+  const exclusionSet = createHeaderExclusionSet(allAuthConfigs);
+  for (const forbidden of FORBIDDEN_FORWARD_HEADERS) {
+    exclusionSet.add(forbidden);
+  }
+  const processedHeaders = createHeadersExcluding(originalRequest.headers, exclusionSet);
 
   // Add custom headers from configuration
   addCustomHeaders(
@@ -72,30 +56,6 @@ export function processHeadersForProxy(
 }
 
 /**
- * Validates header name format (basic validation)
+ * Re-export header validation from utils for backward compatibility
  */
-export function isValidHeaderName(headerName: string): boolean {
-  if (typeof headerName !== 'string' || headerName.trim() === '') {
-    return false;
-  }
-
-  // Basic HTTP header name validation
-  // RFC 7230 allows: token, which is any visible ASCII character except special characters
-  return /^[a-zA-Z0-9!#$%&'*+.^_`|~-]+$/.test(headerName);
-}
-
-// Re-export isValidHeaderValue from utils for backward compatibility
-export { isValidHeaderValue } from './utils/auth-helpers';
-
-/**
- * Gets all header names from a headers object in a case-insensitive manner
- */
-export function getHeaderNamesLowercase(headers: Headers): string[] {
-  const headerNames: string[] = [];
-
-  for (const [key] of headers.entries()) {
-    headerNames.push(key.toLowerCase());
-  }
-
-  return headerNames;
-}
+export { isValidHeaderName, isValidHeaderValue } from './utils/auth-helpers';
