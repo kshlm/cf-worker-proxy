@@ -24,7 +24,7 @@
 
 ## 4. Scripts: secure and deterministic
 
-- [x] 4.1 Write failing tests: `runWrangler` passes arguments via `execFileSync` array form (no shell string), temp file names use `crypto.randomUUID()` (`tests/update-proxy-config.test.ts`)
+- [x] 4.1 Write failing tests: `runWrangler` passes arguments via `execFileSync` array form (no shell string), temp files use uniquely named mkdtemp directories with 0600 files (`tests/update-proxy-config.test.ts`)
 - [x] 4.2 Refactor `scripts/update-proxy-config.ts` to `execFileSync('wrangler', args)` and UUID temp files (make 4.1 pass)
 - [x] 4.3 Write failing tests for backup format `{ version: 1, exportedAt, entries }` and restore accepting both versioned and legacy bare-map formats
 - [x] 4.4 Update `scripts/backup-config.ts` and `scripts/restore-config.ts` accordingly; restore validates every entry with the shared validator before writing, reports per-key failures, exits non-zero on any failure (make 4.3 pass)

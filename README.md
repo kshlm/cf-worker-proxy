@@ -75,11 +75,15 @@ The script provides:
 
 ### Backup and Restore
 
-Back up the KV configuration to a versioned local file, and restore from one:
+Back up the KV configuration to a versioned local file, and restore from one.
+The package scripts are bare commands; extra arguments go through them directly:
 
 ```bash
-# Back up (writes backups/proxy-config-backup-<timestamp>.json, mode 0600)
+# Back up to the default backups/ directory (mode 0600, never overwrites)
 bun run backup-config
+
+# Back up into a different directory
+bun run backup-config /tmp/my-backups
 
 # Preview what a restore would do without writing anything
 bun run restore-config backups/proxy-config-backup-XXX.json --dry-run

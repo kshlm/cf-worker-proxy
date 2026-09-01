@@ -191,7 +191,7 @@ export async function restore(
   // Reserved-key overwrite and --replace pruning need typed confirmation
   // beyond --yes; other keys are covered by --yes or one interactive ack.
   const touchesReserved = keys.includes(GLOBAL_AUTH_KV_KEY)
-  if (!opts.yes && !process.stdin.isTTY && !opts.dryRun) {
+  if (!opts.yes && !process.stdin.isTTY) {
     throw new Error(
       'Refusing to restore without confirmation: pass --yes after reviewing the backup',
     )
@@ -209,7 +209,7 @@ export async function restore(
       throw new Error('Restore cancelled: no confirmation given')
     }
   }
-  if (touchesReserved && !opts.dryRun) {
+  if (touchesReserved) {
     const ok = await confirmOverwrite(GLOBAL_AUTH_KV_KEY)
     if (!ok) {
       throw new Error(

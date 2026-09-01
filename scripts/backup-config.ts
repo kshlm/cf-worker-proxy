@@ -64,7 +64,8 @@ export async function backup(dir: string = BACKUP_DIR): Promise<string> {
 }
 
 if (process.argv[1] && process.argv[1].endsWith('backup-config.ts') && !process.env.VITEST) {
-  backup().catch((error: unknown) => {
+  const dirArg = process.argv.slice(2).find((a) => !a.startsWith('--'))
+  backup(dirArg).catch((error: unknown) => {
     console.error('Backup failed:', error instanceof Error ? error.message : error)
     process.exit(1)
   })

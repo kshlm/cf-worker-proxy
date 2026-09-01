@@ -5,3 +5,7 @@ backups
 coverage
 dist
 openspec
+.crush.json
+.mcp.json
+AGENTS.md
+devenv.lock

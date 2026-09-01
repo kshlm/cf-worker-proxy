@@ -2,6 +2,7 @@ import { execFileSync } from 'child_process'
 import * as fs from 'fs'
 import * as path from 'path'
 import * as os from 'os'
+import { GLOBAL_AUTH_KV_KEY } from '../src/utils/global-auth'
 
 /**
  * Shared Wrangler invocation helper for configuration scripts.
@@ -9,12 +10,16 @@ import * as os from 'os'
  * - Arguments are passed as an argv array with shell: false, so shell
  *   metacharacters in user-controlled values (KV key names, etc.) cannot
  *   be interpreted by a shell.
- * - The wrangler config file and remote target are always explicit, so a
- *   stray local .wrangler state or wrong environment cannot be hit.
+ * - The wrangler config file is always explicit, so a stray local
+ *   .wrangler state or wrong environment cannot be hit.
+ * - The remote/local target flag is command-appropriate: `secret put`
+ *   has no --remote flag, so only KV commands get --remote.
  * - Nonzero exits throw, so callers cannot mistake failure for success.
  */
 export function runWrangler(args: string[], opts: { input?: string } = {}): string {
-  const fullArgs = [...args, '--config', 'wrangler.toml', '--remote']
+  const isSecretCommand = args[0] === 'secret'
+  const targetFlag = isSecretCommand ? [] : ['--remote']
+  const fullArgs = [...args, ...targetFlag, '--config', 'wrangler.toml']
   const output = execFileSync('wrangler', fullArgs, {
     encoding: 'utf-8',
     shell: false,
@@ -28,7 +33,8 @@ export function runWrangler(args: string[], opts: { input?: string } = {}): stri
  * Route IDs are KV keys that map to server configs. Restrict them to a
  * conservative safe set and reject the reserved global auth key.
  */
-export const GLOBAL_AUTH_KV_KEY = 'global-auth-configs'
+export { GLOBAL_AUTH_KV_KEY }
+
 const MAX_ROUTE_ID_LENGTH = 64
 
 export function isValidRouteId(id: string): boolean {

@@ -10,7 +10,9 @@
   "lsp": {
     "typescript": {
       "command": "typescript-language-server",
-      "args": ["--stdio"]
+      "args": [
+        "--stdio"
+      ]
     }
   }
 }

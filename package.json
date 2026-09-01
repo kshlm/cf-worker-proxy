@@ -10,8 +10,8 @@
     "build": "wrangler deploy --dry-run",
     "deploy": "wrangler deploy",
     "update-config": "bun scripts/update-proxy-config.ts",
-    "backup-config": "bun scripts/backup-config.ts [dir]",
-    "restore-config": "bun scripts/restore-config.ts <file> [--dry-run] [--yes] [--replace]",
+    "backup-config": "bun scripts/backup-config.ts",
+    "restore-config": "bun scripts/restore-config.ts",
     "typecheck": "tsc -p tsconfig.check.json --noEmit",
     "lint": "eslint src/ scripts/ tests/",
     "lint:fix": "eslint src/ scripts/ tests/ --fix",
@@ -19,7 +19,7 @@
     "test": "vitest run",
     "test:watch": "vitest watch",
     "test:coverage": "vitest run --coverage",
-    "check": "bun run typecheck && bun run lint && bun run format:check && bun run test",
+    "check": "bun run typecheck && bun run lint && bun run format:check && bun run test:coverage && bun run build",
     "format:check": "prettier --check ."
   },
   "devDependencies": {

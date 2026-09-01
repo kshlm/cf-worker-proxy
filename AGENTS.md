@@ -1,17 +1,14 @@
 <!-- OPENSPEC:START -->
-
 # OpenSpec Instructions
 
 These instructions are for AI assistants working in this project.
 
 Always open `@/openspec/AGENTS.md` when the request:
-
 - Mentions planning or proposals (words like proposal, spec, change, plan)
 - Introduces new capabilities, breaking changes, architecture shifts, or big performance/security work
 - Sounds ambiguous and you need the authoritative spec before coding
 
 Use `@/openspec/AGENTS.md` to learn:
-
 - How to create and apply change proposals
 - Spec format and conventions
 - Project structure and guidelines
@@ -21,30 +18,78 @@ Keep this managed block so 'openspec update' can refresh the instructions.
 <!-- OPENSPEC:END -->
 
 ## Project Overview
+Worker Proxy is a Cloudflare Workers-based proxy server for routing requests to multiple downstream servers based on URL paths. Configuration uses Cloudflare KV for servers and auth. Written in TypeScript.
 
-Worker Proxy is a Cloudflare Workers-based reverse proxy routing requests to multiple downstream servers by URL path. Configuration lives in Cloudflare KV; secrets in Workers secrets. Written in TypeScript, Bun-only tooling.
+Project technical specs are defined in SPECS.md. An initial implementation plan is provided in PLAN.md.
 
-Technical specs are canonical in `openspec/specs/`. The top-level `README.md` is the user-facing guide.
 
 ## Commands
 
-All commands run through Bun (the only supported package manager):
+### Development
+- Start dev server: `wrangler dev` (runs locally with hot reload)
+- Build: `wrangler build` (bundles worker script; usually not needed for JS/TS)
+- Typecheck: `bun run typecheck` (if using TypeScript: `tsc --noEmit`)
 
-- `bun install` — install dependencies
-- `bun run check` — one command: typecheck, lint, format check, tests
-- `bun run dev` — wrangler dev (local hot reload)
-- `bun run build` — wrangler deploy --dry-run (validates the bundle)
-- `bun run typecheck` — tsc over src, scripts, and tests
-- `bun run lint` / `bun run lint:fix` — ESLint (flat config) over src, scripts, tests
-- `bun run format:check` / `bun run format` — Prettier
-- `bun run test` / `bun run test:watch` / `bun run test:coverage`
-- `bun run update-config` — interactive KV configuration script
-- `bun run backup-config` / `bun run restore-config` — KV backup/restore (see README)
-- `bun run deploy` — wrangler deploy
+### Linting & Formatting
+- Lint: `bun run lint` (uses ESLint; checks JS/TS for style/errors)
+- Format: `bun run format` (uses Prettier; auto-formats code)
+- Lint-fix: `bun run lint:fix` (auto-fixes lint issues)
 
-## Code Style
+### Testing
+- Run all tests: `bun run test` (uses Vitest/Jest; runs in Bun.js or worker env)
+- Run single test: `bun run test -- path/to/test.spec.ts` (e.g., `bun run test -- src/handlers.test.ts`)
+- Watch mode: `bun run test:watch` (re-runs on file changes)
+- Coverage: `bun run test:coverage` (generates coverage report)
 
-- TypeScript strict mode; no `any`
-- 2-space indent, single quotes, trailing commas, no semicolons, 100 char lines
-- Tests live in `tests/` with `.test.ts` extension (Vitest, Node env)
-- ESLint: flat config only (`eslint.config.js`); Prettier: `.prettierrc`
+### Deployment
+- Deploy: `wrangler deploy` (uploads to Cloudflare; sets up KV bindings)
+- Deploy with env: `wrangler deploy --env production`
+- Publish: `wrangler publish` (alias for deploy)
+
+### Other
+- Generate types for KV: `wrangler types` (creates KV types)
+- Tail logs: `wrangler tail` (streams invocation logs)
+
+## Code Style Guidelines
+
+### Language & Typing
+- Use TypeScript for all new code (strict mode enabled).
+- Infer types where possible; explicitly type complex interfaces/props.
+- No `any` types; use `unknown` for untyped data.
+
+### Imports
+- Prefer named imports: `import { fetch } from 'whatwg-fetch';`
+- Group imports: Third-party > Local > Side-effect (e.g., CSS).
+- Relative paths for local: `./utils/helper` (no leading /).
+- Use aliases if configured (e.g., `@/src` via tsconfig/vite).
+
+### Formatting
+- Prettier: 2-space indent, single quotes, trailing commas.
+- Line length: 100 characters max.
+- No semicolons in JS/TS unless required.
+
+### Naming Conventions
+- Variables/Functions: camelCase (e.g., `handleRequest`).
+- Constants: UPPER_SNAKE_CASE (e.g., `MAX_RETRIES`).
+- Classes/Interfaces: PascalCase (e.g., `ProxyHandler`).
+- Files: kebab-case for non-components (e.g., `proxy-router.ts`), PascalCase for exports.
+
+### Error Handling
+- Use try/catch for async ops; throw custom errors (e.g., `new ProxyError('Invalid path')`).
+- Log errors with context: `console.error('Proxy failed:', { path, error })`.
+- Return Response with status 500 for unhandled errors; never expose internals.
+- Validate inputs early (e.g., URL paths, auth headers) with guards.
+
+### Best Practices
+- Workers: Export single `fetch` handler; use `export default { fetch }`.
+- KV: Bind namespace in wrangler.toml; use `env.KV.get(key)`.
+- Auth: Compare headers securely (no logging secrets).
+- No external deps unless minimal; prefer Workers Runtime APIs.
+- Tests: Use `vi.mock` for Workers APIs; test edge cases (auth fail, invalid paths).
+
+## Cursor/Copilot Rules
+None specified in .cursor/rules/ or .github/copilot-instructions.md. Follow above guidelines.
+
+## Notes
+- Setup: Run `bun install` for deps (assumes package.json with wrangler, typescript, vitest, eslint, prettier).
+- Extend this file as conventions evolve.

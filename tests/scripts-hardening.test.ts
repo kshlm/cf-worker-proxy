@@ -47,8 +47,12 @@ describe('shared wrangler helper (scripts/wrangler.ts)', () => {
 
     expect(mockExecFileSync).toHaveBeenCalledWith(
       'wrangler',
-      ['kv', 'key', 'list', '--binding=PROXY_SERVERS', '--config', 'wrangler.toml', '--remote'],
-      expect.objectContaining({ encoding: 'utf-8', shell: false }),
+      ['kv', 'key', 'list', '--binding=PROXY_SERVERS', '--remote', '--config', 'wrangler.toml'],
+      expect.objectContaining({
+        encoding: 'utf-8',
+        shell: false,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      }),
     )
   })
 
@@ -74,8 +78,12 @@ describe('shared wrangler helper (scripts/wrangler.ts)', () => {
 
     expect(mockExecFileSync).toHaveBeenCalledWith(
       'wrangler',
-      ['secret', 'put', 'NAME', '--config', 'wrangler.toml', '--remote'],
-      expect.objectContaining({ input: 'token\n', shell: false }),
+      ['secret', 'put', 'NAME', '--config', 'wrangler.toml'],
+      expect.objectContaining({
+        input: 'token\n',
+        shell: false,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      }),
     )
   })
 

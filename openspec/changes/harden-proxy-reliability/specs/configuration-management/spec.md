@@ -100,10 +100,11 @@ The configuration management scripts SHALL produce deterministic, versioned back
 - **AND** `--replace` SHALL additionally delete remote keys absent from the backup
 - **AND** `--replace` SHALL require typed strong confirmation before any write
 
-#### Scenario: Deterministic temp files
+#### Scenario: Uniquely named temp files
 - **WHEN** scripts write temporary files for KV operations
-- **THEN** file names SHALL use `crypto.randomUUID()`
-- **AND** not use timestamp-plus-random concatenation
+- **THEN** each write SHALL target a uniquely named mkdtemp directory
+- **AND** the file SHALL be created with 0600 permissions
+- **AND** the directory SHALL be removed after the operation
 
 #### Scenario: Global auth key overwrite confirmation
 - **WHEN** a restore would overwrite the `global-auth-configs` KV key
