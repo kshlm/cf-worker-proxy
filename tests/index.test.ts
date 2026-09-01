@@ -76,7 +76,7 @@ describe('worker', () => {
     expect(calledRequest.headers.get('X-Custom')).toBe('value')
   })
 
-  it('should return 500 for KV errors', async () => {
+  it('returns generic 500 (no internals) when global auth KV load fails', async () => {
     vi.mocked(mockEnv.PROXY_SERVERS.get).mockRejectedValue(new Error('KV error'))
 
     const request = new Request('https://proxy.example.com/api/test')
@@ -95,7 +95,8 @@ describe('worker', () => {
     const request = new Request('https://proxy.example.com/api/test')
     const response = await worker.fetch(request, mockEnv)
     expect(response.status).toBe(500)
-    expect(await response.text()).toBe('{"error":"Configuration invalid: Backend URL is malformed or insecure."}')
+    // Validation details stay in logs; client gets the generic body
+    expect(await response.text()).toBe('{"error":"Configuration invalid: Server setup requires review."}')
   })
 
   it('should return 500 for non-HTTPS URLs', async () => {
@@ -107,7 +108,8 @@ describe('worker', () => {
     const request = new Request('https://proxy.example.com/api/test')
     const response = await worker.fetch(request, mockEnv)
     expect(response.status).toBe(500)
-    expect(await response.text()).toBe('{"error":"Configuration invalid: Backend URL is malformed or insecure."}')
+    // Validation details stay in logs; client gets the generic body
+    expect(await response.text()).toBe('{"error":"Configuration invalid: Server setup requires review."}')
   })
 
   it('should return 502 for backend fetch errors', async () => {
@@ -123,7 +125,7 @@ describe('worker', () => {
     expect(await response.text()).toBe('{"error":"Backend unavailable: Target server is unreachable."}')
   })
 
-  it('should work with custom auth header', async () => {
+  it('should reject legacy auth fields with 500', async () => {
     vi.mocked(mockEnv.PROXY_SERVERS.get).mockImplementation(async (key: string) => key !== 'global-auth-configs' ? {
       url: 'https://api.example.com',
       auth: 'secret-api-key-123',
@@ -317,7 +319,7 @@ describe('worker', () => {
   })
 
   describe('custom Authorization headers', () => {
-    it('should add Authorization header from custom headers when different auth header is used for auth', async () => {
+    it('overrides downstream Authorization from configured headers even when auth uses another header', async () => {
       vi.mocked(mockEnv.PROXY_SERVERS.get).mockImplementation(async (key: string) => key !== 'global-auth-configs' ? {
         url: 'https://api.example.com',
         authConfigs: [{ header: 'X-API-Key', value: 'secret-api-key' }],
@@ -339,7 +341,7 @@ describe('worker', () => {
       expect(calledRequest.headers.get('X-API-Key')).toBeNull()
     })
 
-    it('should add custom Authorization header when incoming Authorization is removed for security', async () => {
+    it('replaces stripped client Authorization with configured downstream Authorization', async () => {
       vi.mocked(mockEnv.PROXY_SERVERS.get).mockImplementation(async (key: string) => key !== 'global-auth-configs' ? {
         url: 'https://api.example.com',
         authConfigs: [{ header: 'Authorization', value: 'Bearer required-auth' }],
@@ -382,7 +384,7 @@ describe('worker', () => {
       expect(await response.text()).toBe('{"error":"Unauthorized: Invalid or missing credentials."}')
     })
 
-    it('should allow access when any auth header matches (new simplified logic)', async () => {
+    it('should allow access when any auth header matches', async () => {
       vi.mocked(mockEnv.PROXY_SERVERS.get).mockImplementation(async (key: string) => key !== 'global-auth-configs' ? {
         url: 'https://api.example.com',
         authConfigs: [
@@ -402,7 +404,7 @@ describe('worker', () => {
       expect(response.status).toBe(200)
     })
 
-    it('should deny access when no auth headers are present (new simplified logic)', async () => {
+    it('should deny access when no auth headers are present', async () => {
       vi.mocked(mockEnv.PROXY_SERVERS.get).mockImplementation(async (key: string) => key !== 'global-auth-configs' ? {
         url: 'https://api.example.com',
         authConfigs: [

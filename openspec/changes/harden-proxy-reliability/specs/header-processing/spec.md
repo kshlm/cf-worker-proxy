@@ -34,3 +34,57 @@ The system SHALL exclude authentication headers from forwarded requests to preve
 - **THEN** the forwarded request SHALL be created with `redirect: 'manual'`
 - **AND** the worker SHALL NOT automatically re-issue the request to the redirect target with the same headers
 
+
+## MODIFIED Requirements
+
+### Requirement: Configured Header Injection
+The system SHALL apply configured downstream headers to forwarded requests, overriding conflicting client-supplied headers so downstream services receive operator-intended values.
+
+#### Scenario: Header not present in request
+- **WHEN** server config has `headers: { "X-Service": "proxy" }`
+- **AND** incoming request does not have `X-Service` header
+- **THEN** the system SHALL add `X-Service: proxy` to forwarded request
+
+#### Scenario: Header already present in request
+- **WHEN** server config has `headers: { "X-API-Version": "v1" }`
+- **AND** incoming request already has `X-API-Version: v2`
+- **THEN** the system SHALL set the configured value `v1` on the forwarded request
+- **AND** the client-supplied value `v2` SHALL NOT reach the downstream service
+
+#### Scenario: Multiple configured headers
+- **WHEN** server config has multiple headers in `headers` object
+- **THEN** the system SHALL add all configured headers
+- **AND** client-supplied values for those header names SHALL NOT reach the downstream service
+
+#### Scenario: Mixed header presence
+- **WHEN** server config has headers A, B, C
+- **AND** incoming request has header B
+- **THEN** the system SHALL add headers A and C
+- **AND** the forwarded request SHALL carry the configured value for header B
+
+#### Scenario: Downstream credentials are operator-controlled
+- **WHEN** server config has `headers: { "Authorization": "Bearer downstream-token" }`
+- **AND** incoming request has any Authorization header value
+- **THEN** the forwarded Authorization header SHALL be "Bearer downstream-token"
+
+### Requirement: Header Priority Resolution
+The system SHALL resolve header conflicts in favor of configured downstream headers over incoming client headers.
+
+#### Scenario: Incoming header overrides configured header
+- **WHEN** server config has `headers: { "Authorization": "Bearer ${TOKEN}" }`
+- **AND** incoming request has `Authorization: Bearer user-token`
+- **THEN** the system SHALL use the configured header value
+- **AND** not forward the incoming value to the downstream service
+
+
+#### Scenario: Configured header when incoming absent
+- **WHEN** server config has `headers: { "X-Forwarded-For": "proxy" }`
+- **AND** incoming request has no `X-Forwarded-For` header
+- **THEN** the system SHALL use the configured header value
+
+
+#### Scenario: Case-insensitive conflict resolution
+- **WHEN** server config has `headers: { "content-type": "application/json" }`
+- **AND** incoming request has `Content-Type: text/plain`
+- **THEN** the system SHALL treat them as conflicting headers
+- **AND** the forwarded request SHALL carry the configured value `application/json`

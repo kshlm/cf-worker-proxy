@@ -94,7 +94,9 @@ function extractRequestContext(request: Request): RequestContext | null {
 }
 
 /**
- * Loads server configuration from KV storage
+ * Loads server configuration from KV storage. Errors are discriminated so
+ * the caller can distinguish client-fixable 404s from internal 500s without
+ * string matching.
  */
 async function loadServerConfig(
   serverKey: string,
@@ -102,33 +104,31 @@ async function loadServerConfig(
 ): Promise<KVOperationResult<ServerConfig>> {
   // The global auth KV key is reserved; it must never act as a route config.
   if (serverKey === GLOBAL_AUTH_KV_KEY) {
-    return {
-      success: false,
-      error: `Server key "${serverKey}" is reserved and cannot be used as a route.`
-    };
+    return { success: false, error: { kind: 'reserved' } };
   }
 
   try {
     const serverData = await env.PROXY_SERVERS.get(serverKey, { type: 'json' });
-    const config = serverData as ServerConfig;
 
-    if (!config) {
-      return {
-        success: false,
-        error: `No configuration found for server key: ${serverKey}`
-      };
+    if (serverData === null || serverData === undefined) {
+      return { success: false, error: { kind: 'missing' } };
     }
 
-    return {
-      success: true,
-      data: config
-    };
+    // A malformed stored value may deserialize to a non-object (string,
+    // number, array). Treat anything without the required url field as
+    // malformed rather than crashing downstream.
+    if (
+      typeof serverData !== 'object' ||
+      Array.isArray(serverData) ||
+      typeof (serverData as { url?: unknown }).url !== 'string'
+    ) {
+      return { success: false, error: { kind: 'malformed', message: 'Stored config is not a valid server configuration object' } };
+    }
+
+    return { success: true, data: serverData as ServerConfig };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    return {
-      success: false,
-      error: `KV retrieval failed: ${errorMessage}`
-    };
+    return { success: false, error: { kind: 'kv-failure', message: errorMessage } };
   }
 }
 
@@ -195,13 +195,20 @@ export async function processRequest(request: Request, env: Env): Promise<Respon
     // Load server configuration
     const configResult = await loadServerConfig(requestContext.serverKey, env);
     if (!configResult.success) {
-      console.error(`Config load failed for server "${requestContext.serverKey}": ${configResult.error}`);
+      console.error(
+        `Config load failed for server "${requestContext.serverKey}" (${configResult.error.kind}):`,
+        'message' in configResult.error ? configResult.error.message : ''
+      );
 
-      if (configResult.error?.includes('No configuration found')) {
+      // Missing or reserved keys are client-fixable 404s; KV failures and
+      // malformed stored values are internal 500s.
+      if (configResult.error.kind === 'missing') {
         return createServerNotFoundResponse();
       }
-      console.error(`Config load failed: ${configResult.error}`);
-      return createInvalidRouteResponse();
+      if (configResult.error.kind === 'reserved') {
+        return createInvalidRouteResponse();
+      }
+      return createConfigInvalidResponse();
     }
 
     // Process configuration with secret interpolation
@@ -213,16 +220,15 @@ export async function processRequest(request: Request, env: Env): Promise<Respon
       return createConfigInvalidResponse();
     }
 
-    // Validate configuration
-    try {
-      const validation = validateProcessedConfig(processedConfig);
-      if (!validation.isValid) {
-        throw new Error(validation.error?.message || 'Configuration validation failed');
-      }
-    } catch (error) {
-      console.error(`Config validation failed for server "${requestContext.serverKey}": ${error}`);
-      const errorMessage = error instanceof Error ? error.message : 'Configuration invalid: Server setup requires review.';
-      return createConfigInvalidResponse(errorMessage);
+    // Validate configuration. Any failure returns a generic response;
+    // validation details go to logs only, never to the client.
+    const validation = validateProcessedConfig(processedConfig);
+    if (!validation.isValid) {
+      console.error(
+        `Config validation failed for server "${requestContext.serverKey}":`,
+        validation.error?.context || validation.error?.message
+      );
+      return createConfigInvalidResponse();
     }
 
     // Check authentication using two-tier flow

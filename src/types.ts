@@ -32,8 +32,12 @@ export interface ErrorDetails {
   context?: string
 }
 
-export interface KVOperationResult<T = unknown> {
-  success: boolean
-  data?: T
-  error?: string
-}
+export type KVLoadError =
+  | { kind: 'missing' }
+  | { kind: 'reserved' }
+  | { kind: 'kv-failure'; message: string }
+  | { kind: 'malformed'; message: string }
+
+export type KVOperationResult<T = unknown> =
+  | { success: true; data: T }
+  | { success: false; error: KVLoadError }

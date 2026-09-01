@@ -289,3 +289,73 @@ async function loadGlobalAuthConfigurationHelper(env: Env) {
   const { loadGlobalAuthConfiguration } = await import('../src/utils/global-auth')
   return loadGlobalAuthConfiguration(env)
 }
+
+describe('runtime review findings', () => {
+  let mockEnv: Env
+
+  beforeEach(() => {
+    mockEnv = makeEnv()
+    vi.clearAllMocks()
+  })
+
+  function serverConfig(config: unknown) {
+    return vi.mocked(mockEnv.PROXY_SERVERS.get).mockImplementation(async (key: string) =>
+      key === 'api' ? config : key === 'global-auth-configs' ? null : null
+    )
+  }
+
+  it('returns 503-ish generic 500 for KV retrieval failures (not 404)', async () => {
+    vi.mocked(mockEnv.PROXY_SERVERS.get).mockImplementation(async (key: string) => {
+      if (key === 'api') throw new Error('KV internal error')
+      return null
+    })
+
+    const response = await worker.fetch(new Request('https://proxy.example.com/api/x'), mockEnv)
+    expect(response.status).toBe(500)
+    expect(await response.text()).toBe('{"error":"Configuration invalid: Server setup requires review."}')
+  })
+
+  it('returns 404 for missing route and generic 500 for malformed KV JSON', async () => {
+    serverConfig('not-valid-json-at-all' as unknown)
+    // KV with type json would return the raw string when JSON is invalid;
+    // malformed structure (string instead of object) must give generic 500.
+    const response = await worker.fetch(new Request('https://proxy.example.com/api/x'), mockEnv)
+    expect(response.status).toBe(500)
+    expect(await response.text()).toBe('{"error":"Configuration invalid: Server setup requires review."}')
+  })
+
+  it('type-guards malformed auth entries: non-array authConfigs gives generic 500, no TypeError', async () => {
+    serverConfig({ url: 'https://api.example.com', authConfigs: 'oops' })
+
+    const response = await worker.fetch(new Request('https://proxy.example.com/api/x'), mockEnv)
+    expect(response.status).toBe(500)
+    const body = await response.text()
+    expect(body).toBe('{"error":"Configuration invalid: Server setup requires review."}')
+  })
+
+  it('type-guards malformed auth entries: entry missing fields gives generic 500', async () => {
+    serverConfig({ url: 'https://api.example.com', authConfigs: [null] })
+
+    const response = await worker.fetch(new Request('https://proxy.example.com/api/x'), mockEnv)
+    expect(response.status).toBe(500)
+    expect(await response.text()).toBe('{"error":"Configuration invalid: Server setup requires review."}')
+  })
+
+  it('type-guards malformed auth entries before auth matching: entry with non-string header does not crash', async () => {
+    serverConfig({ url: 'https://api.example.com', authConfigs: [{ header: 42 }] })
+
+    const response = await worker.fetch(new Request('https://proxy.example.com/api/x'), mockEnv)
+    expect(response.status).toBe(500)
+  })
+
+  it('validation failure returns generic config-invalid body, no internals leaked', async () => {
+    serverConfig({ url: 'https://api.example.com', authConfigs: [{ header: 'bad header', value: 'v' }] })
+
+    const response = await worker.fetch(new Request('https://proxy.example.com/api/x'), mockEnv)
+    expect(response.status).toBe(500)
+    // Details like the invalid header name go to logs, not the response body
+    const body = await response.text()
+    expect(body).toBe('{"error":"Configuration invalid: Server setup requires review."}')
+    expect(body).not.toContain('bad header')
+  })
+})

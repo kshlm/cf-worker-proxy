@@ -69,12 +69,27 @@ export function validateSecretsAvailable(secretNames: string[], env: Env): boole
 export function processServerConfig(config: ServerConfig, env: Env): ServerConfig {
   const processedConfig = { ...config };
 
-  // Process authConfigs
-  if (processedConfig.authConfigs) {
-    processedConfig.authConfigs = processedConfig.authConfigs.map((config): AuthConfig => ({
-      header: config.header,
-      value: interpolateSecret(config.value, env, true)
-    }));
+  // Process authConfigs. Type-guard malformed entries: a raw TypeError must
+  // never reach the client; invalid shapes fail validation with a generic
+  // error instead.
+  if (processedConfig.authConfigs !== undefined) {
+    if (!Array.isArray(processedConfig.authConfigs)) {
+      throw new TypeError('authConfigs must be an array');
+    }
+    processedConfig.authConfigs = processedConfig.authConfigs.map((config): AuthConfig => {
+      if (
+        config === null ||
+        typeof config !== 'object' ||
+        typeof (config as { header?: unknown }).header !== 'string' ||
+        typeof (config as { value?: unknown }).value !== 'string'
+      ) {
+        throw new TypeError('authConfigs entries must have string header and value fields');
+      }
+      return {
+        header: config.header,
+        value: interpolateSecret(config.value, env, true)
+      };
+    });
   }
 
   // Process headers
@@ -82,7 +97,7 @@ export function processServerConfig(config: ServerConfig, env: Env): ServerConfi
     processedConfig.headers = Object.fromEntries(
       Object.entries(processedConfig.headers).map(([key, value]) => [
         key,
-        interpolateSecret(value, env, false) ?? value
+        interpolateSecret(value, env, false)
       ])
     );
   }
@@ -94,8 +109,18 @@ export function processServerConfig(config: ServerConfig, env: Env): ServerConfi
  * Processes global auth configuration by interpolating secrets in auth configs.
  */
 export function processGlobalAuthConfigs(configs: AuthConfig[], env: Env): AuthConfig[] {
-  return configs.map((config): AuthConfig => ({
-    header: config.header,
-    value: interpolateSecret(config.value, env, true)
-  }));
+  return configs.map((config): AuthConfig => {
+    if (
+      config === null ||
+      typeof config !== 'object' ||
+      typeof (config as { header?: unknown }).header !== 'string' ||
+      typeof (config as { value?: unknown }).value !== 'string'
+    ) {
+      throw new TypeError('Global auth entries must have string header and value fields');
+    }
+    return {
+      header: config.header,
+      value: interpolateSecret(config.value, env, true)
+    };
+  });
 }
